@@ -210,7 +210,10 @@ def format_signal(result):
         f"ATR: {result['atr']:.2f}\n\n"
         f"Сила: {result['score']}%\n"
         f"Сигнал: {result['signal']}"
+    )
         def multi_timeframe_decision():
+    
+       
     results = [build_signal(TRADE_SYMBOL, bar) for bar in TIMEFRAMES]
 
     buy_count = sum(1 for r in results if r["signal"] == "BUY")
