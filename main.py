@@ -223,7 +223,7 @@ def multi_timeframe_decision():
         "results": results
     }
     def get_okx_balance_text():
-    result = account_api.get_account_balance()
+        result = account_api.get_account_balance()
 
     if result.get("code") != "0":
         return f"❌ Ошибка OKX:\n{result}"
