@@ -211,7 +211,7 @@ def format_signal(result):
         f"Сила: {result['score']}%\n"
         f"Сигнал: {result['signal']}"
     )
-    def multi_timeframe_decision():
+def multi_timeframe_decision():
     results = [build_signal(TRADE_SYMBOL, bar) for bar in TIMEFRAMES]
 
     buy_count = sum(1 for r in results if r["signal"] == "BUY")
@@ -231,7 +231,6 @@ def format_signal(result):
         "price": results[1]["price"],
         "results": results
     }
-
 
 def get_okx_balance_text():
     result = account_api.get_account_balance()
