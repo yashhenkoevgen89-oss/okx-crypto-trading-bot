@@ -39,7 +39,6 @@ def calculate_rsi(series, period=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-
 def get_market_data():
     result = market_api.get_candlesticks(
         instId=TRADE_SYMBOL,
