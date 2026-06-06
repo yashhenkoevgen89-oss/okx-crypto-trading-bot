@@ -65,12 +65,12 @@ risk_settings = {
 
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="/status"), KeyboardButton(text="/balance")],
-        [KeyboardButton(text="/signal"), KeyboardButton(text="/market")],
-        [KeyboardButton(text="/scan"), KeyboardButton(text="/best")],
-        [KeyboardButton(text="/risk"), KeyboardButton(text="/pnl")],
-        [KeyboardButton(text="/real_demo_buy"), KeyboardButton(text="/real_demo_sell")],
-        [KeyboardButton(text="/autotrade_status"), KeyboardButton(text="/save")]
+        [KeyboardButton(text="📊 Статус"), KeyboardButton(text="💰 Баланс")],
+        [KeyboardButton(text="📡 Сигнал"), KeyboardButton(text="🌐 Рынок")],
+        [KeyboardButton(text="🔎 Сканер"), KeyboardButton(text="🏆 Лучшая")],
+        [KeyboardButton(text="🟢 Купить DEMO"), KeyboardButton(text="🔴 Продать DEMO")],
+        [KeyboardButton(text="🤖 Авто статус"), KeyboardButton(text="🛡 Риск")],
+        [KeyboardButton(text="📜 История"), KeyboardButton(text="📊 Статистика")]
     ],
     resize_keyboard=True
 )
@@ -222,9 +222,7 @@ def multi_timeframe_decision():
         "price": results[1]["price"],
         "results": results
     }
-
-
-def get_okx_balance_text():
+    def get_okx_balance_text():
     result = account_api.get_account_balance()
 
     if result.get("code") != "0":
@@ -267,33 +265,9 @@ def parse_number(text):
     return safe_float(parts[1].replace(",", "."), None)
 
 
-@dp.message(Command("start"))
-async def start(message: types.Message):
+async def show_status(message: types.Message):
     await message.answer(
-        "🤖 OKX Crypto Trading Bot PRO MAX v4\n\n"
-        "/status — статус\n"
-        "/balance — баланс\n"
-        "/signal — сигнал\n"
-        "/market — мультианализ\n"
-        "/scan — сканер монет\n"
-        "/best — лучшая монета\n"
-        "/real_demo_buy — тестовая покупка OKX Demo\n"
-        "/real_demo_sell — тестовая продажа OKX Demo\n"
-        "/risk — риск\n"
-        "/set_amount 10 — сумма сделки\n"
-        "/autotrade_on — автоторговля DEMO\n"
-        "/autotrade_off — стоп\n"
-        "/autotrade_status — статус\n"
-        "/history — история\n"
-        "/pnl — статистика",
-        reply_markup=keyboard
-    )
-
-
-@dp.message(Command("status"))
-async def status(message: types.Message):
-    await message.answer(
-        f"✅ PRO MAX v4\n\n"
+        f"✅ Статус бота\n\n"
         f"Режим: {'DEMO' if is_demo() else 'LIVE'}\n"
         f"Пара: {TRADE_SYMBOL}\n"
         f"Сумма сделки: {risk_settings['amount_usdt']} USDT\n"
@@ -304,23 +278,20 @@ async def status(message: types.Message):
     )
 
 
-@dp.message(Command("balance"))
-async def balance(message: types.Message):
+async def show_balance(message: types.Message):
     await message.answer(get_okx_balance_text())
 
 
-@dp.message(Command("signal"))
-async def signal(message: types.Message):
+async def show_signal(message: types.Message):
     try:
         r = build_signal()
         add_signal(now(), r["symbol"], r["signal"], r["price"], r["score"])
         await message.answer(format_signal(r))
     except Exception as e:
-        await message.answer(f"❌ Ошибка signal:\n{e}")
+        await message.answer(f"❌ Ошибка сигнала:\n{e}")
 
 
-@dp.message(Command("market"))
-async def market(message: types.Message):
+async def show_market(message: types.Message):
     try:
         d = multi_timeframe_decision()
         text = f"🌐 Мультианализ {TRADE_SYMBOL}\n\n"
@@ -330,13 +301,11 @@ async def market(message: types.Message):
 
         text += f"\nИтог: {d['signal']}\nСредняя сила: {d['avg_score']}%"
         await message.answer(text)
-
     except Exception as e:
-        await message.answer(f"❌ Ошибка market:\n{e}")
+        await message.answer(f"❌ Ошибка рынка:\n{e}")
 
 
-@dp.message(Command("scan"))
-async def scan(message: types.Message):
+async def show_scan(message: types.Message):
     results = []
 
     for coin in WATCHLIST:
@@ -355,8 +324,7 @@ async def scan(message: types.Message):
     await message.answer(text)
 
 
-@dp.message(Command("best"))
-async def best(message: types.Message):
+async def show_best(message: types.Message):
     results = []
 
     for coin in WATCHLIST:
@@ -372,14 +340,10 @@ async def best(message: types.Message):
         await message.answer("Не удалось выбрать лучшую монету.")
         return
 
-    await message.answer(
-        "🏆 Лучшая монета сейчас:\n\n"
-        + format_signal(best_coin)
-    )
+    await message.answer("🏆 Лучшая монета сейчас:\n\n" + format_signal(best_coin))
 
 
-@dp.message(Command("risk"))
-async def risk(message: types.Message):
+async def show_risk(message: types.Message):
     await message.answer(
         f"🛡 Риск\n\n"
         f"Сумма сделки: {risk_settings['amount_usdt']} USDT\n"
@@ -391,25 +355,7 @@ async def risk(message: types.Message):
     )
 
 
-@dp.message(Command("set_amount"))
-async def set_amount(message: types.Message):
-    value = parse_number(message.text)
-
-    if not value or value <= 0:
-        await message.answer("Формат: /set_amount 10")
-        return
-
-    if value > risk_settings["max_amount_usdt"]:
-        await message.answer(f"Максимум: {risk_settings['max_amount_usdt']} USDT")
-        return
-
-    risk_settings["amount_usdt"] = value
-    save_state()
-    await message.answer(f"✅ Сумма сделки: {value} USDT")
-
-
-@dp.message(Command("real_demo_buy"))
-async def real_demo_buy(message: types.Message):
+async def do_demo_buy(message: types.Message):
     if not is_demo():
         await message.answer("⛔ Покупка разрешена только в DEMO.")
         return
@@ -429,18 +375,17 @@ async def real_demo_buy(message: types.Message):
         add_trade(now(), TRADE_SYMBOL, "BUY", price, 0, 0, 100, "manual real demo buy")
 
         await message.answer(
-            f"🟢 Реальная DEMO покупка отправлена в OKX\n\n"
+            f"🟢 DEMO покупка отправлена в OKX\n\n"
             f"Пара: {TRADE_SYMBOL}\n"
             f"Сумма: {amount} USDT\n\n"
             f"Ответ OKX:\n{result}"
         )
 
     except Exception as e:
-        await message.answer(f"❌ Ошибка real_demo_buy:\n{e}")
+        await message.answer(f"❌ Ошибка покупки:\n{e}")
 
 
-@dp.message(Command("real_demo_sell"))
-async def real_demo_sell(message: types.Message):
+async def do_demo_sell(message: types.Message):
     if not is_demo():
         await message.answer("⛔ Продажа разрешена только в DEMO.")
         return
@@ -458,17 +403,16 @@ async def real_demo_sell(message: types.Message):
         add_trade(now(), TRADE_SYMBOL, "SELL", 0, price, 0, 100, "manual real demo sell")
 
         await message.answer(
-            f"🔴 Реальная DEMO продажа отправлена в OKX\n\n"
+            f"🔴 DEMO продажа отправлена в OKX\n\n"
             f"Пара: {TRADE_SYMBOL}\n\n"
             f"Ответ OKX:\n{result}"
         )
 
     except Exception as e:
-        await message.answer(f"❌ Ошибка real_demo_sell:\n{e}")
+        await message.answer(f"❌ Ошибка продажи:\n{e}")
 
 
-@dp.message(Command("history"))
-async def history(message: types.Message):
+async def show_history(message: types.Message):
     if not trade_history:
         await message.answer("История пустая.")
         return
@@ -480,8 +424,7 @@ async def history(message: types.Message):
     await message.answer(text)
 
 
-@dp.message(Command("pnl"))
-async def pnl(message: types.Message):
+async def show_pnl(message: types.Message):
     buys = len([x for x in trade_history if "BUY" in x["action"]])
     sells = len([x for x in trade_history if "SELL" in x["action"]])
 
@@ -490,17 +433,95 @@ async def pnl(message: types.Message):
         f"Всего действий: {len(trade_history)}\n"
         f"BUY: {buys}\n"
         f"SELL: {sells}\n\n"
-        f"Точный PnL по OKX ордерам добавим в следующем шаге."
+        f"Точный PnL по OKX ордерам добавим следующим шагом."
     )
 
 
-@dp.message(Command("save"))
+@dp.message(Command(commands=["start", "старт"]))
+async def start(message: types.Message):
+    await message.answer(
+        "🤖 OKX Crypto Trading Bot\n\n"
+        "Команды:\n"
+        "/статус — статус\n"
+        "/баланс — баланс\n"
+        "/сигнал — сигнал\n"
+        "/рынок — мультианализ\n"
+        "/сканер — сканер монет\n"
+        "/лучшая — лучшая монета\n"
+        "/купить — DEMO покупка\n"
+        "/продать — DEMO продажа\n"
+        "/авто_вкл — включить автоторговлю\n"
+        "/авто_выкл — выключить автоторговлю\n"
+        "/авто_статус — статус автоторговли\n"
+        "/риск — риск\n"
+        "/история — история\n"
+        "/статистика — статистика",
+        reply_markup=keyboard
+    )
+
+
+@dp.message(Command(commands=["status", "статус"]))
+async def status(message: types.Message):
+    await show_status(message)
+
+
+@dp.message(Command(commands=["balance", "баланс"]))
+async def balance(message: types.Message):
+    await show_balance(message)
+
+
+@dp.message(Command(commands=["signal", "сигнал"]))
+async def signal(message: types.Message):
+    await show_signal(message)
+
+
+@dp.message(Command(commands=["market", "рынок"]))
+async def market(message: types.Message):
+    await show_market(message)
+
+
+@dp.message(Command(commands=["scan", "scanner", "сканер"]))
+async def scan(message: types.Message):
+    await show_scan(message)
+
+
+@dp.message(Command(commands=["best", "лучшая"]))
+async def best(message: types.Message):
+    await show_best(message)
+
+
+@dp.message(Command(commands=["risk", "риск"]))
+async def risk(message: types.Message):
+    await show_risk(message)
+
+
+@dp.message(Command(commands=["real_demo_buy", "buy", "купить"]))
+async def real_demo_buy(message: types.Message):
+    await do_demo_buy(message)
+
+
+@dp.message(Command(commands=["real_demo_sell", "sell", "продать"]))
+async def real_demo_sell(message: types.Message):
+    await do_demo_sell(message)
+
+
+@dp.message(Command(commands=["history", "история"]))
+async def history(message: types.Message):
+    await show_history(message)
+
+
+@dp.message(Command(commands=["pnl", "stat", "статистика"]))
+async def pnl(message: types.Message):
+    await show_pnl(message)
+
+
+@dp.message(Command(commands=["save", "сохранить"]))
 async def save_cmd(message: types.Message):
     save_state()
     await message.answer("✅ Состояние сохранено.")
 
 
-@dp.message(Command("load"))
+@dp.message(Command(commands=["load", "загрузить"]))
 async def load_cmd(message: types.Message):
     ok = load_state()
     await message.answer("✅ Состояние загружено." if ok else "Файл состояния не найден.")
@@ -566,7 +587,7 @@ async def autotrade_loop(chat_id):
         await asyncio.sleep(300)
 
 
-@dp.message(Command("autotrade_on"))
+@dp.message(Command(commands=["autotrade_on", "авто_вкл"]))
 async def autotrade_on(message: types.Message):
     global autotrade_enabled
 
@@ -583,14 +604,14 @@ async def autotrade_on(message: types.Message):
     asyncio.create_task(autotrade_loop(message.chat.id))
 
 
-@dp.message(Command("autotrade_off"))
+@dp.message(Command(commands=["autotrade_off", "авто_выкл"]))
 async def autotrade_off(message: types.Message):
     global autotrade_enabled
     autotrade_enabled = False
     await message.answer("⛔ DEMO автоторговля выключена.")
 
 
-@dp.message(Command("autotrade_status"))
+@dp.message(Command(commands=["autotrade_status", "авто_статус"]))
 async def autotrade_status(message: types.Message):
     await message.answer(
         f"🤖 Автоторговля\n\n"
@@ -601,6 +622,36 @@ async def autotrade_status(message: types.Message):
     )
 
 
+@dp.message()
+async def text_router(message: types.Message):
+    text = message.text.lower().strip()
+
+    if "статус" in text:
+        await show_status(message)
+    elif "баланс" in text:
+        await show_balance(message)
+    elif "сигнал" in text:
+        await show_signal(message)
+    elif "рынок" in text:
+        await show_market(message)
+    elif "сканер" in text:
+        await show_scan(message)
+    elif "лучшая" in text:
+        await show_best(message)
+    elif "купить" in text:
+        await do_demo_buy(message)
+    elif "продать" in text:
+        await do_demo_sell(message)
+    elif "риск" in text:
+        await show_risk(message)
+    elif "история" in text:
+        await show_history(message)
+    elif "статистика" in text:
+        await show_pnl(message)
+    else:
+        await message.answer("Я не понял команду. Нажми /старт или выбери кнопку в меню.")
+
+
 async def main():
     if not TELEGRAM_BOT_TOKEN:
         raise RuntimeError("Нет TELEGRAM_BOT_TOKEN")
@@ -608,7 +659,7 @@ async def main():
     init_db()
     load_state()
 
-    print("OKX Crypto Trading Bot PRO MAX v4 started")
+    print("OKX Crypto Trading Bot Russian version started")
     await dp.start_polling(bot)
 
 
