@@ -52,7 +52,6 @@ trade_api = Trade.TradeAPI(
 monitor_enabled = False
 autotrade_enabled = False
 trade_history = []
-open_virtual_position = None
 
 risk_settings = {
     "amount_usdt": TRADE_AMOUNT_USDT,
@@ -84,9 +83,9 @@ def is_demo():
     return OKX_FLAG == "1"
 
 
-def safe_float(x, default=0.0):
+def safe_float(value, default=0.0):
     try:
-        return float(x)
+        return float(value)
     except Exception:
         return default
 
@@ -95,26 +94,24 @@ def save_state():
     data = {
         "trade_history": trade_history,
         "risk_settings": risk_settings,
-        "open_virtual_position": open_virtual_position,
         "trade_symbol": TRADE_SYMBOL
     }
 
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    with open(STATE_FILE, "w", encoding="utf-8") as file:
+        json.dump(data, file, ensure_ascii=False, indent=2)
 
 
 def load_state():
-    global trade_history, risk_settings, open_virtual_position, TRADE_SYMBOL
+    global trade_history, risk_settings, TRADE_SYMBOL
 
     if not os.path.exists(STATE_FILE):
         return False
 
-    with open(STATE_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    with open(STATE_FILE, "r", encoding="utf-8") as file:
+        data = json.load(file)
 
     trade_history = data.get("trade_history", [])
     risk_settings.update(data.get("risk_settings", {}))
-    open_virtual_position = data.get("open_virtual_position")
     TRADE_SYMBOL = data.get("trade_symbol", TRADE_SYMBOL)
 
     return True
@@ -169,7 +166,7 @@ def build_signal(symbol=None, bar="15m"):
         "atr": safe_float(last["atr"]),
     }
 
-    score, signal = calculate_score(data)
+    score, signal_value = calculate_score(data)
 
     return {
         "symbol": symbol,
@@ -182,23 +179,24 @@ def build_signal(symbol=None, bar="15m"):
         "macd_signal": data["macd_signal"],
         "atr": data["atr"],
         "score": score,
-        "signal": signal,
+        "signal": signal_value,
         "trend": "восходящий" if data["ema9"] > data["ema21"] else "нисходящий",
     }
 
 
-def format_signal(r):
+def format_signal(result):
     return (
-        f"📡 {r['symbol']} | {r['bar']}\n\n"
-        f"Цена: {r['price']:.2f}\n"
-        f"Тренд: {r['trend']}\n"
-        f"RSI: {r['rsi']:.2f}\n"
-        f"EMA9: {r['ema9']:.2f}\n"
-        f"EMA21: {r['ema21']:.2f}\n"
-        f"MACD: {r['macd']:.2f}\n"
-        f"ATR: {r['atr']:.2f}\n\n"
-        f"Сила: {r['score']}%\n"
-        f"Сигнал: {r['signal']}"
+        f"📡 {result['symbol']} | {result['bar']}\n\n"
+        f"Цена: {result['price']:.2f}\n"
+        f"Тренд: {result['trend']}\n"
+        f"RSI: {result['rsi']:.2f}\n"
+        f"EMA9: {result['ema9']:.2f}\n"
+        f"EMA21: {result['ema21']:.2f}\n"
+        f"MACD: {result['macd']:.2f}\n"
+        f"MACD Signal: {result['macd_signal']:.2f}\n"
+        f"ATR: {result['atr']:.2f}\n\n"
+        f"Сила: {result['score']}%\n"
+        f"Сигнал: {result['signal']}"
     )
 
 
@@ -210,20 +208,22 @@ def multi_timeframe_decision():
     avg_score = int(sum(r["score"] for r in results) / len(results))
 
     if buy_count >= 2 and avg_score >= risk_settings["buy_score"]:
-        final = "BUY"
+        final_signal = "BUY"
     elif sell_count >= 2 and avg_score <= risk_settings["sell_score"]:
-        final = "SELL"
+        final_signal = "SELL"
     else:
-        final = "HOLD"
+        final_signal = "HOLD"
 
     return {
-        "signal": final,
+        "signal": final_signal,
         "avg_score": avg_score,
         "price": results[1]["price"],
         "results": results
     }
-    def get_okx_balance_text():
-        result = account_api.get_account_balance()
+
+
+def get_okx_balance_text():
+    result = account_api.get_account_balance()
 
     if result.get("code") != "0":
         return f"❌ Ошибка OKX:\n{result}"
@@ -242,11 +242,11 @@ def multi_timeframe_decision():
     return "\n".join(lines) if len(lines) > 1 else "Активов не найдено."
 
 
-def add_history(action, signal, price, score, result=""):
+def add_history(action, signal_value, price, score, result=""):
     trade_history.append({
         "time": now(),
         "action": action,
-        "signal": signal,
+        "signal": signal_value,
         "price": price,
         "score": score,
         "result": str(result)[:300]
@@ -262,6 +262,7 @@ def parse_number(text):
     parts = text.split()
     if len(parts) < 2:
         return None
+
     return safe_float(parts[1].replace(",", "."), None)
 
 
@@ -284,23 +285,28 @@ async def show_balance(message: types.Message):
 
 async def show_signal(message: types.Message):
     try:
-        r = build_signal()
-        add_signal(now(), r["symbol"], r["signal"], r["price"], r["score"])
-        await message.answer(format_signal(r))
+        result = build_signal()
+        add_signal(now(), result["symbol"], result["signal"], result["price"], result["score"])
+        await message.answer(format_signal(result))
     except Exception as e:
         await message.answer(f"❌ Ошибка сигнала:\n{e}")
 
 
 async def show_market(message: types.Message):
     try:
-        d = multi_timeframe_decision()
+        decision = multi_timeframe_decision()
         text = f"🌐 Мультианализ {TRADE_SYMBOL}\n\n"
 
-        for r in d["results"]:
+        for r in decision["results"]:
             text += f"{r['bar']}: {r['signal']} | {r['score']}% | RSI {r['rsi']:.1f}\n"
 
-        text += f"\nИтог: {d['signal']}\nСредняя сила: {d['avg_score']}%"
+        text += (
+            f"\nИтог: {decision['signal']}\n"
+            f"Средняя сила: {decision['avg_score']}%"
+        )
+
         await message.answer(text)
+
     except Exception as e:
         await message.answer(f"❌ Ошибка рынка:\n{e}")
 
@@ -310,8 +316,8 @@ async def show_scan(message: types.Message):
 
     for coin in WATCHLIST:
         try:
-            r = build_signal(coin, "15m")
-            results.append(r)
+            result = build_signal(coin, "15m")
+            results.append(result)
         except Exception:
             continue
 
@@ -329,8 +335,8 @@ async def show_best(message: types.Message):
 
     for coin in WATCHLIST:
         try:
-            r = build_signal(coin, "15m")
-            results.append(r)
+            result = build_signal(coin, "15m")
+            results.append(result)
         except Exception:
             continue
 
@@ -371,6 +377,7 @@ async def do_demo_buy(message: types.Message):
         )
 
         price = build_signal()["price"]
+
         add_history("REAL DEMO BUY", "BUY", price, 100, result)
         add_trade(now(), TRADE_SYMBOL, "BUY", price, 0, 0, 100, "manual real demo buy")
 
@@ -399,6 +406,7 @@ async def do_demo_sell(message: types.Message):
         )
 
         price = build_signal()["price"]
+
         add_history("REAL DEMO SELL", "SELL", price, 100, result)
         add_trade(now(), TRADE_SYMBOL, "SELL", 0, price, 0, 100, "manual real demo sell")
 
@@ -418,8 +426,11 @@ async def show_history(message: types.Message):
         return
 
     text = "📜 История:\n\n"
-    for x in trade_history[-10:]:
-        text += f"{x['time']} | {x['action']} | {x['price']:.2f} | {x['score']}%\n"
+    for item in trade_history[-10:]:
+        text += (
+            f"{item['time']} | {item['action']} | "
+            f"{item['price']:.2f} | {item['score']}%\n"
+        )
 
     await message.answer(text)
 
@@ -537,9 +548,9 @@ async def autotrade_loop(chat_id):
                 await bot.send_message(chat_id, "⛔ LIVE заблокирован.")
                 return
 
-            d = multi_timeframe_decision()
+            decision = multi_timeframe_decision()
 
-            if d["signal"] == "BUY":
+            if decision["signal"] == "BUY":
                 amount = min(risk_settings["amount_usdt"], risk_settings["max_amount_usdt"])
 
                 order = place_demo_buy(
@@ -549,19 +560,19 @@ async def autotrade_loop(chat_id):
                     okx_flag=OKX_FLAG
                 )
 
-                add_history("AUTO REAL DEMO BUY", "BUY", d["price"], d["avg_score"], order)
-                add_trade(now(), TRADE_SYMBOL, "BUY", d["price"], 0, 0, d["avg_score"], "auto demo buy")
+                add_history("AUTO REAL DEMO BUY", "BUY", decision["price"], decision["avg_score"], order)
+                add_trade(now(), TRADE_SYMBOL, "BUY", decision["price"], 0, 0, decision["avg_score"], "auto demo buy")
 
                 await bot.send_message(
                     chat_id,
                     f"🟢 AUTO DEMO BUY отправлен в OKX\n\n"
                     f"Пара: {TRADE_SYMBOL}\n"
-                    f"Цена: {d['price']:.2f}\n"
-                    f"Сила: {d['avg_score']}%\n\n"
+                    f"Цена: {decision['price']:.2f}\n"
+                    f"Сила: {decision['avg_score']}%\n\n"
                     f"Ответ OKX:\n{order}"
                 )
 
-            elif d["signal"] == "SELL":
+            elif decision["signal"] == "SELL":
                 order = place_demo_sell(
                     trade_api=trade_api,
                     account_api=account_api,
@@ -569,15 +580,15 @@ async def autotrade_loop(chat_id):
                     okx_flag=OKX_FLAG
                 )
 
-                add_history("AUTO REAL DEMO SELL", "SELL", d["price"], d["avg_score"], order)
-                add_trade(now(), TRADE_SYMBOL, "SELL", 0, d["price"], 0, d["avg_score"], "auto demo sell")
+                add_history("AUTO REAL DEMO SELL", "SELL", decision["price"], decision["avg_score"], order)
+                add_trade(now(), TRADE_SYMBOL, "SELL", 0, decision["price"], 0, decision["avg_score"], "auto demo sell")
 
                 await bot.send_message(
                     chat_id,
                     f"🔴 AUTO DEMO SELL отправлен в OKX\n\n"
                     f"Пара: {TRADE_SYMBOL}\n"
-                    f"Цена: {d['price']:.2f}\n"
-                    f"Сила: {d['avg_score']}%\n\n"
+                    f"Цена: {decision['price']:.2f}\n"
+                    f"Сила: {decision['avg_score']}%\n\n"
                     f"Ответ OKX:\n{order}"
                 )
 
@@ -624,6 +635,9 @@ async def autotrade_status(message: types.Message):
 
 @dp.message()
 async def text_router(message: types.Message):
+    if not message.text:
+        return
+
     text = message.text.lower().strip()
 
     if "статус" in text:
