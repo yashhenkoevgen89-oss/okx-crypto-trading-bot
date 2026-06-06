@@ -398,8 +398,6 @@ async def show_history(message: types.Message):
         )
 
     await message.answer(text)
-
-
 async def show_statistics(message: types.Message):
     buys = len([x for x in trade_history if "BUY" in x["action"]])
     sells = len([x for x in trade_history if "SELL" in x["action"]])
@@ -410,8 +408,11 @@ async def show_statistics(message: types.Message):
         f"BUY: {buys}\n"
         f"SELL: {sells}"
     )
-    
- async def do_demo_buy(message: types.Message):
+
+
+async def do_demo_buy(message: types.Message):
+
+
     if not is_demo():
         await message.answer("⛔ Покупка разрешена только в DEMO.")
         return
