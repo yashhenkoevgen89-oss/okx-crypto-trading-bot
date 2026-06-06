@@ -1,0 +1,22 @@
+WATCHLIST = [
+    "BTC-USDT",
+    "ETH-USDT",
+    "SOL-USDT",
+    "XRP-USDT",
+    "DOGE-USDT",
+    "ADA-USDT",
+    "AVAX-USDT",
+    "LINK-USDT",
+    "SUI-USDT",
+    "TON-USDT"
+]
+
+TIMEFRAMES = ["5m", "15m", "1H"]
+
+BUY_SCORE = 65
+SELL_SCORE = 35
+
+DEFAULT_STOP_LOSS = 2
+DEFAULT_TAKE_PROFIT = 4
+
+MAX_AMOUNT_USDT = 50
