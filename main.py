@@ -31,6 +31,8 @@ account_api = Account.AccountAPI(
     OKX_FLAG
 )
 
+monitor_enabled = False
+
 
 def calculate_rsi(series, period=14):
     delta = series.diff()
@@ -39,11 +41,12 @@ def calculate_rsi(series, period=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-def get_market_data():
+
+def get_market_data(bar="15m", limit=100):
     result = market_api.get_candlesticks(
         instId=TRADE_SYMBOL,
-        bar="15m",
-        limit="100"
+        bar=bar,
+        limit=str(limit)
     )
 
     candles = result.get("data", [])
@@ -58,33 +61,113 @@ def get_market_data():
         ]
     )
 
-    df["close"] = df["close"].astype(float)
+    for col in ["open", "high", "low", "close", "vol"]:
+        df[col] = df[col].astype(float)
+
     df = df.iloc[::-1].reset_index(drop=True)
 
     df["ema_fast"] = df["close"].ewm(span=9).mean()
     df["ema_slow"] = df["close"].ewm(span=21).mean()
     df["rsi"] = calculate_rsi(df["close"])
 
+    df["macd"] = df["close"].ewm(span=12).mean() - df["close"].ewm(span=26).mean()
+    df["macd_signal"] = df["macd"].ewm(span=9).mean()
+
+    df["bb_mid"] = df["close"].rolling(20).mean()
+    df["bb_std"] = df["close"].rolling(20).std()
+    df["bb_upper"] = df["bb_mid"] + 2 * df["bb_std"]
+    df["bb_lower"] = df["bb_mid"] - 2 * df["bb_std"]
+
+    df["tr1"] = df["high"] - df["low"]
+    df["tr2"] = abs(df["high"] - df["close"].shift())
+    df["tr3"] = abs(df["low"] - df["close"].shift())
+    df["tr"] = df[["tr1", "tr2", "tr3"]].max(axis=1)
+    df["atr"] = df["tr"].rolling(14).mean()
+
+    df["vol_avg"] = df["vol"].rolling(20).mean()
+
     return df
 
 
-def analyze_market():
-    df = get_market_data()
+def build_signal(bar="15m"):
+    df = get_market_data(bar=bar)
     last = df.iloc[-1]
 
-    if last["ema_fast"] > last["ema_slow"] and last["rsi"] < 70:
+    price = last["close"]
+    rsi = last["rsi"]
+    ema_fast = last["ema_fast"]
+    ema_slow = last["ema_slow"]
+    macd = last["macd"]
+    macd_signal = last["macd_signal"]
+    bb_upper = last["bb_upper"]
+    bb_lower = last["bb_lower"]
+    atr = last["atr"]
+    vol = last["vol"]
+    vol_avg = last["vol_avg"]
+
+    score = 50
+    reasons = []
+
+    if ema_fast > ema_slow:
+        score += 15
+        reasons.append("EMA показывает рост")
+    else:
+        score -= 15
+        reasons.append("EMA показывает снижение")
+
+    if rsi < 30:
+        score += 15
+        reasons.append("RSI зона перепроданности")
+    elif rsi > 70:
+        score -= 15
+        reasons.append("RSI зона перекупленности")
+    else:
+        reasons.append("RSI нейтральный")
+
+    if macd > macd_signal:
+        score += 10
+        reasons.append("MACD bullish")
+    else:
+        score -= 10
+        reasons.append("MACD bearish")
+
+    if price <= bb_lower:
+        score += 10
+        reasons.append("Цена у нижней Bollinger Band")
+    elif price >= bb_upper:
+        score -= 10
+        reasons.append("Цена у верхней Bollinger Band")
+
+    if vol > vol_avg:
+        score += 5
+        reasons.append("Объём выше среднего")
+    else:
+        reasons.append("Объём обычный")
+
+    score = max(0, min(100, score))
+
+    if score >= 65:
         signal = "BUY"
-    elif last["ema_fast"] < last["ema_slow"] and last["rsi"] > 30:
+    elif score <= 35:
         signal = "SELL"
     else:
         signal = "HOLD"
 
+    trend = "восходящий" if ema_fast > ema_slow else "нисходящий"
+
     return {
-        "price": last["close"],
-        "ema_fast": last["ema_fast"],
-        "ema_slow": last["ema_slow"],
-        "rsi": last["rsi"],
-        "signal": signal
+        "bar": bar,
+        "price": price,
+        "rsi": rsi,
+        "ema_fast": ema_fast,
+        "ema_slow": ema_slow,
+        "macd": macd,
+        "macd_signal": macd_signal,
+        "atr": atr,
+        "trend": trend,
+        "score": score,
+        "signal": signal,
+        "reasons": reasons
     }
 
 
@@ -94,13 +177,9 @@ def get_okx_balance():
     if result.get("code") != "0":
         return f"Ошибка OKX API:\n{result}"
 
-    data = result.get("data", [])
-    if not data:
-        return "Баланс пуст или OKX не вернул данные."
-
-    details = data[0].get("details", [])
+    details = result.get("data", [{}])[0].get("details", [])
     if not details:
-        return "На аккаунте нет активов."
+        return "Баланс OKX Demo: активов не найдено."
 
     lines = ["💰 Баланс OKX Demo:\n"]
 
@@ -120,20 +199,39 @@ def get_okx_balance():
                 f"{ccy}: баланс {bal_float:.8f}, доступно {avail_float:.8f}"
             )
 
-    if len(lines) == 1:
-        return "Баланс OKX Demo: активов не найдено."
+    return "\n".join(lines) if len(lines) > 1 else "Баланс OKX Demo: активов не найдено."
 
-    return "\n".join(lines)
+
+def format_signal(result):
+    reasons_text = "\n".join([f"• {r}" for r in result["reasons"]])
+
+    return (
+        f"📡 Сигнал {TRADE_SYMBOL} | {result['bar']}\n\n"
+        f"Цена: {result['price']:.2f}\n"
+        f"Тренд: {result['trend']}\n\n"
+        f"RSI: {result['rsi']:.2f}\n"
+        f"EMA 9: {result['ema_fast']:.2f}\n"
+        f"EMA 21: {result['ema_slow']:.2f}\n"
+        f"MACD: {result['macd']:.2f}\n"
+        f"MACD Signal: {result['macd_signal']:.2f}\n"
+        f"ATR: {result['atr']:.2f}\n\n"
+        f"Сила сигнала: {result['score']}%\n"
+        f"Рекомендация: {result['signal']}\n\n"
+        f"Причины:\n{reasons_text}"
+    )
 
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
     await message.answer(
         "🤖 OKX Crypto Trading Bot запущен.\n\n"
-        "Команды:\n"
-        "/status — статус бота\n"
-        "/analyze — анализ рынка OKX\n"
+        "/status — статус\n"
+        "/analyze — быстрый анализ\n"
+        "/signal — расширенный сигнал\n"
+        "/market — анализ 5m / 15m / 1H\n"
         "/balance — баланс OKX Demo\n"
+        "/monitor_on — включить автоанализ\n"
+        "/monitor_off — выключить автоанализ\n"
         "/help — помощь"
     )
 
@@ -141,27 +239,24 @@ async def start(message: types.Message):
 @dp.message(Command("help"))
 async def help_command(message: types.Message):
     await message.answer(
-        "📌 Команды:\n\n"
-        "/start — запуск\n"
-        "/status — статус\n"
-        "/analyze — анализ BTC-USDT\n"
-        "/balance — баланс OKX Demo\n\n"
-        "Сейчас бот работает безопасно: анализ и просмотр баланса, без сделок."
+        "📌 Бот работает в безопасном режиме.\n\n"
+        "Он анализирует рынок, показывает баланс и отправляет сигналы.\n"
+        "Покупка и продажа пока отключены."
     )
 
 
 @dp.message(Command("status"))
 async def status(message: types.Message):
     mode = "DEMO" if OKX_FLAG == "1" else "LIVE"
-
     api_status = "подключён" if OKX_API_KEY and OKX_SECRET_KEY and OKX_PASSPHRASE else "не подключён"
 
     await message.answer(
         f"✅ Бот работает\n\n"
         f"Режим OKX: {mode}\n"
         f"OKX API: {api_status}\n"
-        f"Торговая пара: {TRADE_SYMBOL}\n"
+        f"Пара: {TRADE_SYMBOL}\n"
         f"Размер сделки: {TRADE_AMOUNT_USDT} USDT\n"
+        f"Автоанализ: {'включён' if monitor_enabled else 'выключен'}\n"
         f"Автоторговля: выключена"
     )
 
@@ -169,10 +264,10 @@ async def status(message: types.Message):
 @dp.message(Command("analyze"))
 async def analyze(message: types.Message):
     try:
-        result = analyze_market()
+        result = build_signal("15m")
         await message.answer(
             f"📊 Анализ {TRADE_SYMBOL}\n\n"
-            f"Цена: {result['price']}\n"
+            f"Цена: {result['price']:.2f}\n"
             f"RSI: {result['rsi']:.2f}\n"
             f"EMA 9: {result['ema_fast']:.2f}\n"
             f"EMA 21: {result['ema_slow']:.2f}\n\n"
@@ -182,13 +277,81 @@ async def analyze(message: types.Message):
         await message.answer(f"❌ Ошибка анализа:\n{e}")
 
 
+@dp.message(Command("signal"))
+async def signal(message: types.Message):
+    try:
+        result = build_signal("15m")
+        await message.answer(format_signal(result))
+    except Exception as e:
+        await message.answer(f"❌ Ошибка сигнала:\n{e}")
+
+
+@dp.message(Command("market"))
+async def market(message: types.Message):
+    try:
+        bars = ["5m", "15m", "1H"]
+        text = f"🌐 Мультианализ {TRADE_SYMBOL}\n\n"
+
+        for bar in bars:
+            result = build_signal(bar)
+            text += (
+                f"{bar}: {result['signal']} | "
+                f"сила {result['score']}% | "
+                f"RSI {result['rsi']:.1f} | "
+                f"тренд {result['trend']}\n"
+            )
+
+        await message.answer(text)
+
+    except Exception as e:
+        await message.answer(f"❌ Ошибка market:\n{e}")
+
+
 @dp.message(Command("balance"))
 async def balance(message: types.Message):
     try:
-        result = get_okx_balance()
-        await message.answer(result)
+        await message.answer(get_okx_balance())
     except Exception as e:
         await message.answer(f"❌ Ошибка баланса:\n{e}")
+
+
+async def monitor_loop(chat_id):
+    global monitor_enabled
+
+    while monitor_enabled:
+        try:
+            result = build_signal("15m")
+
+            if result["signal"] != "HOLD":
+                await bot.send_message(
+                    chat_id,
+                    "🔔 Найден торговый сигнал\n\n" + format_signal(result)
+                )
+
+        except Exception as e:
+            await bot.send_message(chat_id, f"❌ Ошибка автоанализа:\n{e}")
+
+        await asyncio.sleep(300)
+
+
+@dp.message(Command("monitor_on"))
+async def monitor_on(message: types.Message):
+    global monitor_enabled
+
+    if monitor_enabled:
+        await message.answer("Автоанализ уже включён.")
+        return
+
+    monitor_enabled = True
+    await message.answer("✅ Автоанализ включён. Проверка рынка каждые 5 минут.")
+    asyncio.create_task(monitor_loop(message.chat.id))
+
+
+@dp.message(Command("monitor_off"))
+async def monitor_off(message: types.Message):
+    global monitor_enabled
+    monitor_enabled = False
+    await message.answer("⛔ Автоанализ выключен.")
 
 
 async def main():
