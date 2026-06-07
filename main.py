@@ -1072,7 +1072,7 @@ async def reset_position(message: types.Message):
 # TEXT ROUTER
 # =========================
 
-@@dp.message()
+@dp.message()
 async def text_router(message: types.Message):
 
     global auto_select_symbol
