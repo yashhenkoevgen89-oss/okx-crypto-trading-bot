@@ -544,20 +544,20 @@ async def do_demo_sell(message: types.Message):
 async def autotrade_loop(chat_id):
     global autotrade_enabled
 
-    while autotrade_enabled:
-        try:
-            if not is_demo():
-                autotrade_enabled = False
-                await bot.send_message(
-                    chat_id,
-                    "⛔ LIVE режим заблокирован. Автоторговля остановлена."
-                )
-                return
+    while autotrade_while autotrade_enabled:
+    try:
+        if not is_demo():
+            autotrade_enabled = False
+            await bot.send_message(
+                chat_id,
+                "⛔ LIVE режим заблокирован."
+            )
+            return
 
-                       trade_symbol = TRADE_SYMBOL
+        trade_symbol = TRADE_SYMBOL
 
-            if auto_select_symbol:
-                trade_symbol, best_data = choose_best_symbol()
+        if auto_select_symbol:
+            trade_symbol, best_data = choose_best_symbol()
 
                 await bot.send_message(
                     chat_id,
