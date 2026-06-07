@@ -82,8 +82,8 @@ trade_api = Trade.TradeAPI(
 
 autotrade_enabled = False
 auto_select_symbol = True
-
 current_trade_symbol = TRADE_SYMBOL
+
 trade_history = []
 closed_trades = []
 open_position = None
@@ -233,12 +233,25 @@ def add_closed_trade(symbol: str, entry: float, exit_price: float, amount: float
 
 
 def trades_today_count() -> int:
-    return len([x for x in trade_history if x.get("date") == today_str() and "AUTO" in x.get("action", "")])
+    return len(
+        [
+            item for item in trade_history
+            if item.get("date") == today_str()
+            and "AUTO" in item.get("action", "")
+        ]
+    )
 
 
 def pnl_today_percent() -> float:
-    trades = [x for x in closed_trades if x.get("date") == today_str()]
-    return sum(safe_float(x.get("pnl_percent")) for x in trades)
+    trades = [
+        item for item in closed_trades
+        if item.get("date") == today_str()
+    ]
+
+    return sum(
+        safe_float(item.get("pnl_percent"))
+        for item in trades
+    )
 
 
 def can_trade_today() -> tuple[bool, str]:
@@ -249,6 +262,8 @@ def can_trade_today() -> tuple[bool, str]:
         return False, "Достигнут дневной лимит убытка"
 
     return True, "OK"
+
+
 # =========================
 # ИНДИКАТОРЫ
 # =========================
@@ -295,10 +310,8 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["atr"] = true_range.rolling(14).mean().fillna(0)
 
     return df
-
-
-# =========================
-# СИГНАЛЫ
+    # =========================
+# СИГНАЛЫ И РЫНОК
 # =========================
 
 def calculate_score(data: dict) -> tuple[int, str]:
@@ -500,279 +513,295 @@ def choose_best_symbol() -> tuple[str, dict | None]:
 
     best = results[0]
     return best["symbol"], best
+    # =========================
+# SHOW ФУНКЦИИ
 # =========================
-# OKX СДЕЛКИ
-# =========================
 
-def place_market_buy(symbol: str, amount_usdt: float):
+async def show_status(message: types.Message):
+    mode = "DEMO 🧪" if is_demo() else "LIVE 🔥"
 
-    if not is_demo():
-        raise Exception("LIVE торговля заблокирована")
-
-    return trade_api.place_order(
-        instId=symbol,
-        tdMode="cash",
-        side="buy",
-        ordType="market",
-        sz=str(amount_usdt),
-        tgtCcy="quote_ccy",
+    await message.answer(
+        f"📊 Статус\n\n"
+        f"Режим: {mode}\n"
+        f"Монета: {current_trade_symbol}\n"
+        f"Автоторговля: {'✅ ВКЛ' if autotrade_enabled else '❌ ВЫКЛ'}\n"
+        f"Автовыбор монеты: {'✅ ВКЛ' if auto_select_symbol else '❌ ВЫКЛ'}\n"
+        f"Интервал: {AUTO_INTERVAL} сек"
     )
 
 
-def place_market_sell(symbol: str, amount_usdt: float, price: float):
+async def show_balance(message: types.Message):
+    try:
+        balance_data = account_api.get_account_balance()
 
-    if not is_demo():
-        raise Exception("LIVE торговля заблокирована")
+        usdt_balance = 0.0
 
-    base_amount = amount_usdt / price
-
-    return trade_api.place_order(
-        instId=symbol,
-        tdMode="cash",
-        side="sell",
-        ordType="market",
-        sz=str(round(base_amount, 8)),
-    )
-
-
-def get_okx_balance_text() -> str:
-
-    result = account_api.get_account_balance()
-
-    if result.get("code") != "0":
-        return f"❌ Ошибка OKX:\n{result}"
-
-    details = result.get("data", [{}])[0].get("details", [])
-
-    text = "💰 Баланс OKX DEMO\n\n"
-
-    for item in details:
-
-        ccy = item.get("ccy")
-        balance = safe_float(item.get("cashBal"))
-
-        if balance > 0:
-            text += f"{ccy}: {balance:.8f}\n"
-
-    return text
-
-
-# =========================
-# РАБОТА С ПОЗИЦИЕЙ
-# =========================
-
-def open_new_position(
-    symbol: str,
-    entry_price: float,
-    amount_usdt: float
-):
-
-    global open_position
-
-    stop_loss_price = entry_price * (
-        1 - risk_settings["stop_loss_percent"] / 100
-    )
-
-    take_profit_price = entry_price * (
-        1 + risk_settings["take_profit_percent"] / 100
-    )
-
-    open_position = {
-        "symbol": symbol,
-        "entry_price": entry_price,
-        "amount_usdt": amount_usdt,
-        "stop_loss_price": stop_loss_price,
-        "take_profit_price": take_profit_price,
-        "highest_price": entry_price,
-        "time": now(),
-    }
-
-    save_state()
-
-
-def close_position(
-    exit_price: float,
-    reason: str
-):
-
-    global open_position
-
-    if open_position is None:
-        return
-
-    add_closed_trade(
-        open_position["symbol"],
-        open_position["entry_price"],
-        exit_price,
-        open_position["amount_usdt"],
-        reason
-    )
-
-    open_position = None
-
-    save_state()
-
-
-def update_trailing_stop(current_price: float):
-
-    global open_position
-
-    if open_position is None:
-        return
-
-    if current_price > open_position["highest_price"]:
-
-        open_position["highest_price"] = current_price
-
-        new_stop = current_price * (
-            1 - risk_settings["trailing_stop_percent"] / 100
-        )
-
-        if new_stop > open_position["stop_loss_price"]:
-            open_position["stop_loss_price"] = new_stop
-
-    save_state()
-
-
-# =========================
-# PNL
-# =========================
-
-def total_pnl_percent():
-
-    return sum(
-        safe_float(x.get("pnl_percent"))
-        for x in closed_trades
-    )
-
-
-def total_pnl_usdt():
-
-    return sum(
-        safe_float(x.get("pnl_usdt"))
-        for x in closed_trades
-    )
-
-
-# =========================
-# ТОП МОНЕТЫ
-# =========================
-
-def top_three_coins():
-
-    results = scan_market()
-
-    return results[:3]
-
-
-# =========================
-# ПОКАЗ ПОЗИЦИИ
-# =========================
-
-async def show_position(message: types.Message):
-
-    if open_position is None:
+        for item in balance_data["data"]:
+            for detail in item["details"]:
+                if detail["ccy"] == "USDT":
+                    usdt_balance = safe_float(detail["cashBal"])
 
         await message.answer(
-            "📋 Открытых позиций нет."
+            f"💰 Баланс\n\n"
+            f"USDT: {usdt_balance:.2f}"
         )
 
-        return
+    except Exception as e:
+        await message.answer(f"❌ Ошибка баланса:\n{e}")
 
-    symbol = open_position["symbol"]
 
-    current_price = build_signal(
-        symbol,
-        "15m"
-    )["price"]
+async def show_signal(message: types.Message):
+    try:
+        result = build_signal(current_trade_symbol)
 
-    pnl_percent = (
-        (
-            current_price
-            -
-            open_position["entry_price"]
+        await message.answer(format_signal(result))
+
+    except Exception as e:
+        await message.answer(f"❌ Ошибка сигнала:\n{e}")
+
+
+async def show_market(message: types.Message):
+    try:
+        decision = multi_timeframe_decision_for_symbol(current_trade_symbol)
+
+        text = (
+            f"🌐 Мультианализ {current_trade_symbol}\n\n"
         )
-        /
-        open_position["entry_price"]
-    ) * 100
 
-    await message.answer(
+        for item in decision["results"]:
+            text += (
+                f"{item['bar']} | "
+                f"{item['signal']} | "
+                f"{item['score']}%\n"
+            )
 
-        f"📋 Открытая позиция\n\n"
+        text += (
+            f"\nИтог: {decision['signal']}\n"
+            f"Сила: {decision['avg_score']}%"
+        )
 
-        f"Пара: {symbol}\n"
+        await message.answer(text)
 
-        f"Цена входа: "
-        f"{open_position['entry_price']:.4f}\n"
-
-        f"Текущая цена: "
-        f"{current_price:.4f}\n"
-
-        f"PnL: {pnl_percent:.2f}%\n"
-
-        f"SL: "
-        f"{open_position['stop_loss_price']:.4f}\n"
-
-        f"TP: "
-        f"{open_position['take_profit_price']:.4f}"
-    )
+    except Exception as e:
+        await message.answer(f"❌ Ошибка рынка:\n{e}")
 
 
-# =========================
-# СТАТИСТИКА
-# =========================
+async def show_scan(message: types.Message):
+    try:
+        results = scan_market()
 
-async def show_pnl(message: types.Message):
+        text = "🔎 Сканер рынка\n\n"
 
-    await message.answer(
+        for item in results[:10]:
+            text += (
+                f"{item['symbol']} | "
+                f"{item['signal']} | "
+                f"{item['score']}%\n"
+            )
 
-        f"💹 PnL\n\n"
+        await message.answer(text)
 
-        f"Всего закрытых сделок: "
-        f"{len(closed_trades)}\n\n"
+    except Exception as e:
+        await message.answer(f"❌ Ошибка сканера:\n{e}")
 
-        f"Общий результат:\n"
 
-        f"{total_pnl_percent():.2f}%\n"
+async def show_best(message: types.Message):
+    try:
+        symbol, data = choose_best_symbol()
 
-        f"{total_pnl_usdt():.2f} USDT"
-    )
+        if data is None:
+            await message.answer("❌ Нет данных")
+            return
+
+        await message.answer(
+            f"🏆 Лучшая монета\n\n"
+            f"{symbol}\n"
+            f"Сигнал: {data['signal']}\n"
+            f"Сила: {data['score']}%"
+        )
+
+    except Exception as e:
+        await message.answer(f"❌ Ошибка:\n{e}")
 
 
 async def show_top3(message: types.Message):
+    try:
+        results = scan_market()
 
-    results = top_three_coins()
+        text = "🥇 ТОП-3 монеты\n\n"
 
-    if not results:
+        for i, item in enumerate(results[:3], start=1):
+            text += (
+                f"{i}. "
+                f"{item['symbol']} | "
+                f"{item['signal']} | "
+                f"{item['score']}%\n"
+            )
 
-        await message.answer(
-            "❌ Нет данных."
-        )
+        await message.answer(text)
 
+    except Exception as e:
+        await message.answer(f"❌ Ошибка:\n{e}")
+
+
+async def show_position(message: types.Message):
+    if open_position is None:
+        await message.answer("📋 Открытых позиций нет.")
         return
 
-    text = "🥇 ТОП-3 монеты\n\n"
+    await message.answer(
+        f"📋 Позиция\n\n"
+        f"Монета: {open_position['symbol']}\n"
+        f"Вход: {open_position['entry_price']:.4f}\n"
+        f"Объём: {open_position['amount_usdt']:.2f} USDT\n"
+        f"SL: {open_position['stop_loss']:.4f}\n"
+        f"TP: {open_position['take_profit']:.4f}"
+    )
 
-    place = 1
 
-    for item in results:
+async def show_current_symbol(message: types.Message):
+    await message.answer(
+        f"💱 Текущая монета\n\n"
+        f"{current_trade_symbol}"
+    )
 
+
+async def show_risk(message: types.Message):
+    await message.answer(
+        f"🛡 Риск\n\n"
+        f"Сумма сделки: {risk_settings['amount_usdt']} USDT\n"
+        f"Макс. сумма: {risk_settings['max_amount_usdt']} USDT\n"
+        f"Stop Loss: {risk_settings['stop_loss_percent']}%\n"
+        f"Take Profit: {risk_settings['take_profit_percent']}%\n"
+        f"Trailing Stop: {risk_settings['trailing_stop_percent']}%\n"
+        f"BUY score: {risk_settings['buy_score']}\n"
+        f"SELL score: {risk_settings['sell_score']}"
+    )
+
+
+async def show_history(message: types.Message):
+    if not trade_history:
+        await message.answer("📜 История пуста.")
+        return
+
+    text = "📜 Последние сделки\n\n"
+
+    for item in trade_history[-10:]:
         text += (
-            f"{place}. "
-            f"{item['symbol']} | "
-            f"{item['signal']} | "
-            f"{item['score']}%\n"
+            f"{item['time']}\n"
+            f"{item['action']}\n"
+            f"{item['symbol']}\n\n"
         )
 
-        place += 1
-
     await message.answer(text)
-# =========================
-# АВТОТОРГОВЛЯ PRO MAX
+
+
+async def show_statistics(message: types.Message):
+    if not closed_trades:
+        await message.answer("📈 Пока статистики нет.")
+        return
+
+    total = len(closed_trades)
+
+    profit = sum(
+        item["pnl_usdt"]
+        for item in closed_trades
+    )
+
+    await message.answer(
+        f"📈 Статистика\n\n"
+        f"Закрытых сделок: {total}\n"
+        f"Итоговый PnL: {profit:.2f} USDT"
+    )
+    # =========================
+# DEMO ПОКУПКА / ПРОДАЖА
 # =========================
 
-async def autotrade_loop(chat_id: int):
+async def do_demo_buy(message: types.Message):
+    global open_position
 
+    try:
+        signal_data = build_signal(current_trade_symbol)
+        price = signal_data["price"]
+
+        open_position = {
+            "symbol": current_trade_symbol,
+            "entry_price": price,
+            "amount_usdt": risk_settings["amount_usdt"],
+            "stop_loss": price * (1 - risk_settings["stop_loss_percent"] / 100),
+            "take_profit": price * (1 + risk_settings["take_profit_percent"] / 100),
+            "time": now()
+        }
+
+        add_history(
+            "MANUAL DEMO BUY",
+            current_trade_symbol,
+            price,
+            signal_data["score"]
+        )
+
+        save_state()
+
+        await message.answer(
+            f"🟢 DEMO покупка\n\n"
+            f"Монета: {current_trade_symbol}\n"
+            f"Цена: {price:.4f}\n"
+            f"Сила сигнала: {signal_data['score']}%"
+        )
+
+    except Exception as e:
+        await message.answer(f"❌ Ошибка покупки:\n{e}")
+
+
+async def do_demo_sell(message: types.Message):
+    global open_position
+
+    try:
+        if open_position is None:
+            await message.answer("📋 Открытых позиций нет.")
+            return
+
+        signal_data = build_signal(open_position["symbol"])
+        exit_price = signal_data["price"]
+
+        add_closed_trade(
+            open_position["symbol"],
+            open_position["entry_price"],
+            exit_price,
+            open_position["amount_usdt"],
+            "manual sell"
+        )
+
+        add_history(
+            "MANUAL DEMO SELL",
+            open_position["symbol"],
+            exit_price,
+            signal_data["score"]
+        )
+
+        pnl = (
+            (exit_price - open_position["entry_price"])
+            / open_position["entry_price"]
+        ) * 100
+
+        open_position = None
+
+        save_state()
+
+        await message.answer(
+            f"🔴 DEMO продажа\n\n"
+            f"PnL: {pnl:.2f}%"
+        )
+
+    except Exception as e:
+        await message.answer(f"❌ Ошибка продажи:\n{e}")
+
+
+# =========================
+# АВТОТОРГОВЛЯ
+# =========================
+
+async def autotrade_loop(chat_id):
     global autotrade_enabled
     global current_trade_symbol
     global open_position
@@ -781,250 +810,153 @@ async def autotrade_loop(chat_id: int):
 
         try:
 
-            # --------------------------------
-            # Проверка дневных лимитов
-            # --------------------------------
-
             allowed, reason = can_trade_today()
 
             if not allowed:
-
                 await bot.send_message(
                     chat_id,
-                    f"⛔ Торговля остановлена\n\n{reason}"
+                    f"⛔ {reason}"
                 )
-
                 autotrade_enabled = False
                 save_state()
-
-                return
-
-
-            # --------------------------------
-            # Автосопровождение позиции
-            # --------------------------------
-
-            if open_position is not None:
-
-                symbol = open_position["symbol"]
-
-                current_price = build_signal(
-                    symbol,
-                    "15m"
-                )["price"]
-
-                update_trailing_stop(current_price)
-
-
-                # TAKE PROFIT
-
-                if current_price >= open_position["take_profit_price"]:
-
-                    amount = open_position["amount_usdt"]
-
-                    place_market_sell(
-                        symbol,
-                        amount,
-                        current_price
-                    )
-
-                    close_position(
-                        current_price,
-                        "TAKE PROFIT"
-                    )
-
-                    await bot.send_message(
-                        chat_id,
-                        f"🎯 TAKE PROFIT\n\n"
-                        f"{symbol}\n"
-                        f"{current_price:.4f}"
-                    )
-
-                    await asyncio.sleep(AUTO_INTERVAL)
-                    continue
-
-
-                # STOP LOSS
-
-                if current_price <= open_position["stop_loss_price"]:
-
-                    amount = open_position["amount_usdt"]
-
-                    place_market_sell(
-                        symbol,
-                        amount,
-                        current_price
-                    )
-
-                    close_position(
-                        current_price,
-                        "STOP LOSS"
-                    )
-
-                    await bot.send_message(
-                        chat_id,
-                        f"🛑 STOP LOSS\n\n"
-                        f"{symbol}\n"
-                        f"{current_price:.4f}"
-                    )
-
-                    await asyncio.sleep(AUTO_INTERVAL)
-                    continue
-
-
-            # --------------------------------
-            # Если позиция уже открыта
-            # новую не открываем
-            # --------------------------------
-
-            if open_position is not None:
-
-                await asyncio.sleep(AUTO_INTERVAL)
-                continue
-
-
-            # --------------------------------
-            # Автовыбор монеты
-            # --------------------------------
-
-            trade_symbol = TRADE_SYMBOL
+                break
 
             if auto_select_symbol:
 
-                trade_symbol, best = choose_best_symbol()
+                symbol, best_data = choose_best_symbol()
 
-                if best:
+                current_trade_symbol = symbol
+
+                if best_data is not None:
 
                     await bot.send_message(
                         chat_id,
-                        f"🧠 Выбрана монета\n\n"
-                        f"{trade_symbol}\n"
-                        f"Сигнал: {best['signal']}\n"
-                        f"Сила: {best['score']}%"
+                        f"🧠 Автовыбор монеты\n\n"
+                        f"{symbol}\n"
+                        f"Сигнал: {best_data['signal']}\n"
+                        f"Сила: {best_data['score']}%"
                     )
 
-            current_trade_symbol = trade_symbol
-
-            save_state()
-
-
-            # --------------------------------
-            # Multi timeframe
-            # --------------------------------
-
             decision = multi_timeframe_decision_for_symbol(
-                trade_symbol
+                current_trade_symbol
             )
 
+            if open_position is None:
 
-            # --------------------------------
-            # BUY
-            # --------------------------------
+                if decision["signal"] == "BUY":
 
-            if decision["signal"] == "BUY":
+                    price = decision["price"]
 
-                amount = min(
-                    risk_settings["amount_usdt"],
-                    risk_settings["max_amount_usdt"]
+                    open_position = {
+                        "symbol": current_trade_symbol,
+                        "entry_price": price,
+                        "amount_usdt": risk_settings["amount_usdt"],
+                        "stop_loss": price * (
+                            1 - risk_settings["stop_loss_percent"] / 100
+                        ),
+                        "take_profit": price * (
+                            1 + risk_settings["take_profit_percent"] / 100
+                        ),
+                        "time": now()
+                    }
+
+                    add_history(
+                        "AUTO BUY",
+                        current_trade_symbol,
+                        price,
+                        decision["avg_score"]
+                    )
+
+                    save_state()
+
+                    await bot.send_message(
+                        chat_id,
+                        f"🟢 AUTO BUY\n\n"
+                        f"{current_trade_symbol}\n"
+                        f"Цена: {price:.4f}\n"
+                        f"Сила: {decision['avg_score']}%"
+                    )
+
+            else:
+
+                signal_data = build_signal(
+                    open_position["symbol"]
                 )
 
-                order = place_market_buy(
-                    trade_symbol,
-                    amount
-                )
+                current_price = signal_data["price"]
 
-                open_new_position(
-                    trade_symbol,
-                    decision["price"],
-                    amount
-                )
+                if (
+                    current_price <= open_position["stop_loss"]
+                    or current_price >= open_position["take_profit"]
+                    or decision["signal"] == "SELL"
+                ):
 
-                add_history(
-                    "AUTO DEMO BUY",
-                    trade_symbol,
-                    decision["price"],
-                    decision["avg_score"],
-                    order
-                )
+                    add_closed_trade(
+                        open_position["symbol"],
+                        open_position["entry_price"],
+                        current_price,
+                        open_position["amount_usdt"],
+                        "auto close"
+                    )
 
-                await bot.send_message(
+                    add_history(
+                        "AUTO SELL",
+                        open_position["symbol"],
+                        current_price,
+                        decision["avg_score"]
+                    )
 
-                    chat_id,
+                    pnl = (
+                        (current_price - open_position["entry_price"])
+                        / open_position["entry_price"]
+                    ) * 100
 
-                    f"🟢 AUTO BUY\n\n"
+                    await bot.send_message(
+                        chat_id,
+                        f"🔴 AUTO SELL\n\n"
+                        f"PnL: {pnl:.2f}%"
+                    )
 
-                    f"Пара: {trade_symbol}\n"
+                    open_position = None
+                    save_state()
 
-                    f"Цена: "
-                    f"{decision['price']:.4f}\n"
-
-                    f"Сила: "
-                    f"{decision['avg_score']}%\n"
-
-                    f"TP: "
-                    f"{open_position['take_profit_price']:.4f}\n"
-
-                    f"SL: "
-                    f"{open_position['stop_loss_price']:.4f}"
-                )
-
-
-            # --------------------------------
-            # SELL без позиции не нужен
-            # --------------------------------
-
-        except Exception as error:
+        except Exception as e:
 
             await bot.send_message(
                 chat_id,
-                f"❌ Ошибка автоторговли\n\n{error}"
+                f"❌ Ошибка автоторговли\n{e}"
             )
 
         await asyncio.sleep(AUTO_INTERVAL)
+
+
 # =========================
-# КОМАНДЫ
+# АВТО ВКЛ / ВЫКЛ
 # =========================
 
-@dp.message(Command(commands=["start", "старт"]))
-async def start(message: types.Message):
-
-    await message.answer(
-        "🤖 OKX Crypto Trading Bot PRO MAX запущен",
-        reply_markup=keyboard
-    )
-
-
-@dp.message(Command(commands=["авто_вкл"]))
-async def autotrade_on(message: types.Message):
-
+async def enable_autotrade(message: types.Message):
     global autotrade_enabled
 
     if autotrade_enabled:
 
         await message.answer(
-            "🤖 Автоторговля уже включена."
+            "✅ Автоторговля уже включена."
         )
-
         return
 
     autotrade_enabled = True
-
     save_state()
 
-    await message.answer(
-        "✅ Автоторговля включена."
-    )
-
     asyncio.create_task(
-        autotrade_loop(
-            message.chat.id
-        )
+        autotrade_loop(message.chat.id)
+    )
+
+    await message.answer(
+        "🟢 Автоторговля включена."
     )
 
 
-@dp.message(Command(commands=["авто_выкл"]))
-async def autotrade_off(message: types.Message):
-
+async def disable_autotrade(message: types.Message):
     global autotrade_enabled
 
     autotrade_enabled = False
@@ -1032,40 +964,69 @@ async def autotrade_off(message: types.Message):
     save_state()
 
     await message.answer(
-        "⛔ Автоторговля выключена."
+        "🔴 Автоторговля выключена."
+    )
+    # =========================
+# TELEGRAM КОМАНДЫ
+# =========================
+
+@dp.message(Command("start"))
+async def start_cmd(message: types.Message):
+
+    await message.answer(
+        "🤖 OKX Crypto Trading Bot PRO MAX запущен",
+        reply_markup=keyboard
     )
 
 
-@dp.message(Command(commands=["позиция"]))
-async def position_command(message: types.Message):
-
-    await show_position(message)
-
-
-@dp.message(Command(commands=["pnl"]))
-async def pnl_command(message: types.Message):
-
-    await show_pnl(message)
+@dp.message(Command("status"))
+async def status_cmd(message: types.Message):
+    await show_status(message)
 
 
-@dp.message(Command(commands=["топ3"]))
-async def top3_command(message: types.Message):
+@dp.message(Command("balance"))
+async def balance_cmd(message: types.Message):
+    await show_balance(message)
 
+
+@dp.message(Command("signal"))
+async def signal_cmd(message: types.Message):
+    await show_signal(message)
+
+
+@dp.message(Command("market"))
+async def market_cmd(message: types.Message):
+    await show_market(message)
+
+
+@dp.message(Command("scan"))
+async def scan_cmd(message: types.Message):
+    await show_scan(message)
+
+
+@dp.message(Command("best"))
+async def best_cmd(message: types.Message):
+    await show_best(message)
+
+
+@dp.message(Command("top3"))
+async def top3_cmd(message: types.Message):
     await show_top3(message)
 
 
-@dp.message(Command(commands=["сброс"]))
-async def reset_position(message: types.Message):
+@dp.message(Command("position"))
+async def position_cmd(message: types.Message):
+    await show_position(message)
 
-    global open_position
 
-    open_position = None
+@dp.message(Command("history"))
+async def history_cmd(message: types.Message):
+    await show_history(message)
 
-    save_state()
 
-    await message.answer(
-        "♻️ Позиция сброшена."
-    )
+@dp.message(Command("statistics"))
+async def statistics_cmd(message: types.Message):
+    await show_statistics(message)
 
 
 # =========================
@@ -1076,6 +1037,7 @@ async def reset_position(message: types.Message):
 async def text_router(message: types.Message):
 
     global auto_select_symbol
+    global current_trade_symbol
     global open_position
 
     if not message.text:
@@ -1083,89 +1045,94 @@ async def text_router(message: types.Message):
 
     text = message.text.lower().strip()
 
-    # Сначала специальные команды
+    try:
 
-    if "авто статус" in text:
+        if "статус" in text:
+            await show_status(message)
+
+        elif "баланс" in text:
+            await show_balance(message)
+
+        elif "сигнал" in text:
+            await show_signal(message)
+
+        elif "рынок" in text:
+            await show_market(message)
+
+        elif "сканер" in text:
+            await show_scan(message)
+
+        elif "лучшая" in text:
+            await show_best(message)
+
+        elif "топ-3" in text:
+            await show_top3(message)
+
+        elif "позиция" in text:
+            await show_position(message)
+
+        elif "купить" in text:
+            await do_demo_buy(message)
+
+        elif "продать" in text:
+            await do_demo_sell(message)
+
+        elif "авто вкл" in text:
+            await enable_autotrade(message)
+
+        elif "авто выкл" in text:
+            await disable_autotrade(message)
+
+        elif "авто монета" in text:
+
+            auto_select_symbol = not auto_select_symbol
+
+            save_state()
+
+            await message.answer(
+                f"🧠 Автовыбор монеты: {'✅ включён' if auto_select_symbol else '❌ выключен'}"
+            )
+
+        elif "текущая монета" in text:
+            await show_current_symbol(message)
+
+        elif "авто статус" in text:
+
+            await message.answer(
+                f"🤖 Авто статус\n\n"
+                f"Автоторговля: {'✅' if autotrade_enabled else '❌'}\n"
+                f"Автовыбор монеты: {'✅' if auto_select_symbol else '❌'}"
+            )
+
+        elif "риск" in text:
+            await show_risk(message)
+
+        elif "история" in text:
+            await show_history(message)
+
+        elif "статистика" in text or "pnl" in text:
+            await show_statistics(message)
+
+        elif "сброс позиции" in text:
+
+            open_position = None
+
+            save_state()
+
+            await message.answer(
+                "♻️ Позиция сброшена"
+            )
+
+        else:
+
+            await message.answer(
+                "❓ Команда не распознана"
+            )
+
+    except Exception as e:
+
         await message.answer(
-            f"🤖 Автостатус\n\n"
-            f"Автоторговля: {'включена ✅' if autotrade_enabled else 'выключена ❌'}\n"
-            f"Автовыбор монеты: {'включён ✅' if auto_select_symbol else 'выключен ❌'}\n"
-            f"Текущая монета: {current_trade_symbol}"
-        )
-
-    elif "авто монета" in text:
-        
-
-        auto_select_symbol = not auto_select_symbol
-        save_state()
-
-        await message.answer(
-            f"🧠 Автовыбор монеты: {'включён ✅' if auto_select_symbol else 'выключен ❌'}"
-        )
-
-    elif "текущая монета" in text:
-        await show_current_symbol(message)
-
-    elif "авто вкл" in text:
-        await autotrade_on(message)
-
-    elif "авто выкл" in text:
-        await autotrade_off(message)
-
-    elif "топ-3" in text or "топ3" in text:
-        await show_top3(message)
-
-    elif "позиция" in text:
-        await show_position(message)
-
-    elif "pnl" in text:
-        await show_pnl(message)
-
-    elif "сброс" in text:
-        
-
-        open_position = None
-        save_state()
-
-        await message.answer("♻️ Позиция сброшена.")
-
-    # Потом обычные команды
-
-    elif "статус" in text:
-        await show_status(message)
-
-    elif "баланс" in text:
-        await show_balance(message)
-
-    elif "сигнал" in text:
-        await show_signal(message)
-
-    elif "рынок" in text:
-        await show_market(message)
-
-    elif "сканер" in text:
-        await show_scan(message)
-
-    elif "лучшая" in text:
-        await show_best(message)
-
-    elif "купить" in text:
-        await do_demo_buy(message)
-
-    elif "продать" in text:
-        await do_demo_sell(message)
-
-    elif "история" in text:
-        await show_history(message)
-
-    elif "статистика" in text:
-        await show_statistics(message)
-
-    elif "риск" in text:
-        await show_risk(message)
-
-    else:
-        await message.answer("❓ Команда не распознана.\n\nНажми /старт"
+            f"❌ Ошибка:\n{e}"
         )
 
 
@@ -1175,21 +1142,12 @@ async def text_router(message: types.Message):
 
 async def main():
 
-    if not TELEGRAM_BOT_TOKEN:
-
-        raise RuntimeError(
-            "Нет TELEGRAM_BOT_TOKEN"
-        )
-
     load_state()
 
-    print(
-        "OKX Crypto Trading Bot PRO MAX started"
-    )
+    print("OKX Crypto Trading Bot PRO MAX запущен")
 
     await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
-
     asyncio.run(main())
