@@ -554,7 +554,7 @@ async def autotrade_loop(chat_id):
                 )
                 return
 
-            decision = multi_timeframe_decision()
+            decision = multi_timeframe_decision_for_symbol(trade_symbol)
 
             if decision["signal"] == "BUY":
                 amount = min(
