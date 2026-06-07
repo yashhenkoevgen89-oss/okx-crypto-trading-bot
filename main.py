@@ -55,6 +55,9 @@ trade_api = Trade.TradeAPI(
 autotrade_enabled = False
 trade_history = []
 
+auto_select_symbol = True
+current_trade_symbol = TRADE_SYMBOL
+
 risk_settings = {
     "amount_usdt": TRADE_AMOUNT_USDT,
     "max_amount_usdt": 50.0,
@@ -70,7 +73,8 @@ keyboard = ReplyKeyboardMarkup(
         [KeyboardButton(text="📡 Сигнал"), KeyboardButton(text="🌐 Рынок")],
         [KeyboardButton(text="🔎 Сканер"), KeyboardButton(text="🏆 Лучшая")],
         [KeyboardButton(text="🟢 Купить DEMO"), KeyboardButton(text="🔴 Продать DEMO")],
-        [KeyboardButton(text="🟢 Авто ВКЛ"), KeyboardButton(text="🔴 Авто ВЫКЛ")],
+        [[KeyboardButton(text="🟢 Авто ВКЛ"), KeyboardButton(text="🔴 Авто ВЫКЛ")],
+        [KeyboardButton(text="🧠 Авто монета"), KeyboardButton(text="💱 Текущая монета")],
         [KeyboardButton(text="🤖 Авто статус"), KeyboardButton(text="🛡 Риск")],
         [KeyboardButton(text="📜 История"), KeyboardButton(text="📈 Статистика")]
     ],
@@ -212,7 +216,8 @@ def format_signal(result):
         f"Сигнал: {result['signal']}"
     )
 def multi_timeframe_decision():
-    results = [build_signal(TRADE_SYMBOL, bar) for bar in TIMEFRAMES]
+    def multi_timeframe_decision_for_symbol(symbol):
+    results = [build_signal(symbol, bar) for bar in TIMEFRAMES]
 
     buy_count = sum(1 for r in results if r["signal"] == "BUY")
     sell_count = sum(1 for r in results if r["signal"] == "SELL")
@@ -226,10 +231,29 @@ def multi_timeframe_decision():
         final_signal = "HOLD"
 
     return {
+        "symbol": symbol,
         "signal": final_signal,
         "avg_score": avg_score,
         "price": results[1]["price"],
         "results": results
+    }
+
+
+def choose_best_symbol():
+    results = []
+
+    for coin in WATCHLIST:
+        try:
+            result = build_signal(coin, "15m")
+            results.append(result)
+        except Exception:
+            continue
+
+    if not results:
+        return TRADE_SYMBOL, None
+
+    best = get_best_coin(results)
+    return best["symbol"], best
     }
 
 def get_okx_balance_text():
@@ -373,7 +397,13 @@ async def show_best(message: types.Message):
     )
 
 
-async def show_risk(message: types.Message):
+async def show_current_symbol(message: types.Message):
+    await message.answer(
+        f"💱 Текущая монета\n\n"
+        f"Основная пара: {TRADE_SYMBOL}\n"
+        f"Торговая пара сейчас: {current_trade_symbol}\n"
+        f"Автовыбор монеты: {'включён ✅' if auto_select_symbol else 'выключен ❌'}"
+    )async def show_risk(message: types.Message):
     await message.answer(
         f"🛡 Риск\n\n"
         f"Сделка: {risk_settings['amount_usdt']} USDT\n"
@@ -742,7 +772,21 @@ async def autotrade_status(message: types.Message):
         f"Интервал: {AUTO_INTERVAL} секунд\n"
         f"Сумма сделки: {risk_settings['amount_usdt']} USDT"
     )
+@dp.message(Command(commands=["auto_coin", "авто_монета"]))
+async def auto_coin_toggle(message: types.Message):
+    global auto_select_symbol
 
+    auto_select_symbol = not auto_select_symbol
+    save_state()
+
+    await message.answer(
+        f"🧠 Автовыбор монеты: {'включён ✅' if auto_select_symbol else 'выключен ❌'}"
+    )
+
+
+@dp.message(Command(commands=["current_coin", "текущая_монета"]))
+async def current_coin(message: types.Message):
+    await show_current_symbol(message)
 
 @dp.message(Command(commands=["save", "сохранить"]))
 async def save_cmd(message: types.Message):
@@ -765,8 +809,12 @@ async def text_router(message: types.Message):
 
     text = message.text.lower().strip()
 
-    if "авто вкл" in text or "авто_вкл" in text:
-        await autotrade_on(message)
+    if "авто монета" in text or "авто_монета" in text:
+    await auto_coin_toggle(message)
+elif "текущая монета" in text or "текущая_монета" in text:
+    await show_current_symbol(message)
+elif "авто вкл" in text or "авто_вкл" in text:
+    await autotrade_on(message)
     elif "авто выкл" in text or "авто_выкл" in text:
         await autotrade_off(message)
     elif "авто статус" in text or "авто_статус" in text:
