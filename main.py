@@ -233,7 +233,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["atr"] = true_range.rolling(14).mean().fillna(0)
 
     return df
-    # =========================
+# =========================
 # ОЦЕНКА СИГНАЛА
 # =========================
 
@@ -493,7 +493,7 @@ def get_okx_balance_text() -> str:
         return "Баланс пустой."
 
     return "\n".join(lines)
-    # =========================
+# =========================
 # ЭКРАНЫ
 # =========================
 
@@ -740,7 +740,7 @@ async def do_demo_sell(message: types.Message):
 
     except Exception as error:
         await message.answer(f"❌ Ошибка продажи:\n{error}")
-    # =========================
+# =========================
 # АВТОТОРГОВЛЯ
 # =========================
 
