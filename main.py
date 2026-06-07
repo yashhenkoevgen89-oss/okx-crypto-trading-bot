@@ -812,37 +812,37 @@ async def text_router(message: types.Message):
 
     if "авто монета" in text or "авто_монета" in text:
     await auto_coin_toggle(message)
-    elif "текущая монета" in text or "текущая_монета" in text:
+elif "текущая монета" in text or "текущая_монета" in text:
     await show_current_symbol(message)
-    elif "авто вкл" in text or "авто_вкл" in text:
+elif "авто вкл" in text or "авто_вкл" in text:
     await autotrade_on(message)
-    elif "авто выкл" in text or "авто_выкл" in text:
-        await autotrade_off(message)
-    elif "авто статус" in text or "авто_статус" in text:
-        await autotrade_status(message)
-    elif "статус" in text:
-        await show_status(message)
-    elif "баланс" in text:
+elif "авто выкл" in text or "авто_выкл" in text:
+    await autotrade_off(message)
+elif "авто статус" in text or "авто_статус" in text:
+    await autotrade_status(message)
+elif "статус" in text:
+    await show_status(message)
+elif "баланс" in text:
         await show_balance(message)
-    elif "сигнал" in text:
+elif "сигнал" in text:
         await show_signal(message)
-    elif "рынок" in text:
+elif "рынок" in text:
         await show_market(message)
-    elif "сканер" in text:
+elif "сканер" in text:
         await show_scan(message)
-    elif "лучшая" in text:
+elif "лучшая" in text:
         await show_best(message)
-    elif "купить" in text:
+elif "купить" in text:
         await do_demo_buy(message)
-    elif "продать" in text:
+elif "продать" in text:
         await do_demo_sell(message)
-    elif "риск" in text:
+elif "риск" in text:
         await show_risk(message)
-    elif "история" in text:
+elif "история" in text:
         await show_history(message)
-    elif "статистика" in text:
+elif "статистика" in text:
         await show_statistics(message)
-    else:
+else:
         await message.answer(
             "Я не понял команду. Нажми /старт или выбери кнопку в меню."
         )
