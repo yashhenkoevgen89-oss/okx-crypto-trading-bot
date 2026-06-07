@@ -1409,7 +1409,12 @@ async def autotrade_loop(chat_id):
                 # ===================
 
                 if current_price >= position["take_profit_price"]:
-
+                if not is_demo():
+                   place_market_sell(
+                        symbol,
+                        position["amount_usdt"],
+                        current_price
+                    )
                     close_position(
                         symbol,
                         current_price,
@@ -1437,7 +1442,12 @@ async def autotrade_loop(chat_id):
                 # ===================
 
                 if current_price <= position["stop_loss_price"]:
-
+                if not is_demo():
+                    place_market_sell(
+                        symbol,
+                        position["amount_usdt"],
+                        current_price
+                    )
                     close_position(
                         symbol,
                         current_price,
@@ -1469,7 +1479,12 @@ async def autotrade_loop(chat_id):
                 )
 
                 if decision["signal"] == "SELL":
-
+                if not is_demo():
+                    place_market_sell(
+                        symbol,
+                        position["amount_usdt"],
+                        current_price
+                    )
                     close_position(
                         symbol,
                         current_price,
@@ -1524,7 +1539,11 @@ async def autotrade_loop(chat_id):
                             risk_settings["amount_usdt"],
                             risk_settings["max_amount_usdt"]
                         )
-
+                    if not is_demo():
+                        place_market_buy(
+                            symbol,
+                            amount
+                        )
                         open_position(
                             symbol,
                             decision["price"],
