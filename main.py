@@ -1350,71 +1350,46 @@ async def do_live_sell(message):
 # =========================
 
 async def autotrade_loop(chat_id):
-
     global autotrade_enabled
     global current_trade_symbol
 
     while autotrade_enabled:
-
         try:
-
             allowed, reason = can_trade_today()
 
             if not allowed:
-
                 await bot.send_message(
                     chat_id,
                     f"⛔ Автоторговля остановлена\n\n{reason}"
                 )
-
                 autotrade_enabled = False
                 save_runtime_settings()
-
                 break
 
             positions = get_open_positions()
 
-            # ====================================
-            # СОПРОВОЖДЕНИЕ ОТКРЫТЫХ ПОЗИЦИЙ
-            # ====================================
-
             for symbol, position in positions.items():
-
-                signal_data = build_signal(
-                    symbol,
-                    "15m"
-                )
-
+                signal_data = build_signal(symbol, "15m")
                 current_price = signal_data["price"]
 
-                update_trailing_stop(
-                    symbol,
-                    current_price
-                )
+                update_trailing_stop(symbol, current_price)
 
                 positions = get_open_positions()
                 position = positions[symbol]
 
                 pnl_percent = (
-                    (
-                        current_price
-                        - position["entry_price"]
-                    )
-                    /
-                    position["entry_price"]
+                    (current_price - position["entry_price"])
+                    / position["entry_price"]
                 ) * 100
 
-                # ===================
-                # TAKE PROFIT
-                # ===================
-
                 if current_price >= position["take_profit_price"]:
-                if not is_demo():
-                   place_market_sell(
-                        symbol,
-                        position["amount_usdt"],
-                        current_price
-                    )
+                    if not is_demo():
+                        place_market_sell(
+                            symbol,
+                            position["amount_usdt"],
+                            current_price
+                        )
+
                     close_position(
                         symbol,
                         current_price,
@@ -1437,17 +1412,14 @@ async def autotrade_loop(chat_id):
 
                     continue
 
-                # ===================
-                # STOP LOSS
-                # ===================
-
                 if current_price <= position["stop_loss_price"]:
-                if not is_demo():
-                    place_market_sell(
-                        symbol,
-                        position["amount_usdt"],
-                        current_price
-                    )
+                    if not is_demo():
+                        place_market_sell(
+                            symbol,
+                            position["amount_usdt"],
+                            current_price
+                        )
+
                     close_position(
                         symbol,
                         current_price,
@@ -1470,21 +1442,16 @@ async def autotrade_loop(chat_id):
 
                     continue
 
-                # ===================
-                # SELL SIGNAL
-                # ===================
-
-                decision = multi_timeframe_decision_for_symbol(
-                    symbol
-                )
+                decision = multi_timeframe_decision_for_symbol(symbol)
 
                 if decision["signal"] == "SELL":
-                if not is_demo():
-                    place_market_sell(
-                        symbol,
-                        position["amount_usdt"],
-                        current_price
-                    )
+                    if not is_demo():
+                        place_market_sell(
+                            symbol,
+                            position["amount_usdt"],
+                            current_price
+                        )
+
                     close_position(
                         symbol,
                         current_price,
@@ -1505,45 +1472,33 @@ async def autotrade_loop(chat_id):
                         f"PnL: {pnl_percent:.2f}%"
                     )
 
-            # ====================================
-            # ПОИСК НОВОЙ СДЕЛКИ
-            # ====================================
-
             positions = get_open_positions()
 
             if len(positions) < risk_settings["max_open_positions"]:
-
                 if auto_select_symbol:
-
                     symbol, best_data = choose_best_symbol()
-
                 else:
-
                     symbol = current_trade_symbol
 
                 current_trade_symbol = symbol
 
-                decision = multi_timeframe_decision_for_symbol(
-                    symbol
-                )
+                decision = multi_timeframe_decision_for_symbol(symbol)
 
                 if decision["signal"] == "BUY":
-
-                    allowed, reason = can_open_new_position(
-                        symbol
-                    )
+                    allowed, reason = can_open_new_position(symbol)
 
                     if allowed:
-
                         amount = min(
                             risk_settings["amount_usdt"],
                             risk_settings["max_amount_usdt"]
                         )
-                    if not is_demo():
-                        place_market_buy(
-                            symbol,
-                            amount
-                        )
+
+                        if not is_demo():
+                            place_market_buy(
+                                symbol,
+                                amount
+                            )
+
                         open_position(
                             symbol,
                             decision["price"],
@@ -1568,16 +1523,12 @@ async def autotrade_loop(chat_id):
             save_runtime_settings()
 
         except Exception as e:
-
             await bot.send_message(
                 chat_id,
                 f"❌ Ошибка автоторговли\n\n{e}"
             )
 
-        await asyncio.sleep(
-            AUTO_INTERVAL
-        )
-
+        await asyncio.sleep(AUTO_INTERVAL)
 
 # =========================
 # AUTO ON / OFF
