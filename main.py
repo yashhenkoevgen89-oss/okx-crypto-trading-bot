@@ -215,7 +215,7 @@ def format_signal(result):
         f"Сила: {result['score']}%\n"
         f"Сигнал: {result['signal']}"
     )
-def multi_timeframe_decision():
+    
 def multi_timeframe_decision_for_symbol(symbol):
     results = [build_signal(symbol, bar) for bar in TIMEFRAMES]
 
