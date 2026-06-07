@@ -626,8 +626,7 @@ async def autotrade_loop(chat_id):
                 )
 
                 add_trade(
-                    now(),
-                    TRADE_SYMBOL,
+                    now(),trade_symbol,
                     "SELL",
                     0,
                     decision["price"],
