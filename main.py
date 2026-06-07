@@ -545,7 +545,7 @@ async def autotrade_loop(chat_id):
     global autotrade_enabled
 
     while autotrade_enabled:
-        try:
+    try:
         if not is_demo():
             autotrade_enabled = False
             await bot.send_message(
@@ -559,16 +559,18 @@ async def autotrade_loop(chat_id):
         if auto_select_symbol:
             trade_symbol, best_data = choose_best_symbol()
 
-                await bot.send_message(
-                    chat_id,
-                    f"🧠 Автовыбор монеты\n\n"
-                    f"Выбрана: {trade_symbol}\n"
-                    f"Сигнал: {best_data['signal'] if best_data else 'нет'}\n"
-                    f"Сила: {best_data['score'] if best_data else 0}%"
-                ) 
-             decision = multi_timeframe_decision_for_symbol(trade_symbol)
-            
-            if decision["signal"] == "BUY":
+            await bot.send_message(
+                chat_id,
+                f"🧠 Автовыбор монеты\n\n"
+                f"Выбрана: {trade_symbol}\n"
+                f"Сигнал: {best_data['signal']}\n"
+                f"Сила: {best_data['score']}%"
+            )
+
+        decision = multi_timeframe_decision_for_symbol(trade_symbol)
+
+        if decision["signal"] == "BUY":
+            ...
                 amount = min(
                     risk_settings["amount_usdt"],
                     risk_settings["max_amount_usdt"]
