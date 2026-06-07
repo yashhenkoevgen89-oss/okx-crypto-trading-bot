@@ -844,7 +844,7 @@ async def text_router(message: types.Message):
         await show_statistics(message)
     else:
         await message.answer("Я не понял команду. Нажми /старт")
-        )
+        
 
 
 async def main():
