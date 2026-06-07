@@ -254,7 +254,7 @@ def choose_best_symbol():
 
     best = get_best_coin(results)
     return best["symbol"], best
-    }
+    
 
 def get_okx_balance_text():
     result = account_api.get_account_balance()
