@@ -1072,8 +1072,11 @@ async def reset_position(message: types.Message):
 # TEXT ROUTER
 # =========================
 
-@dp.message()
+@@dp.message()
 async def text_router(message: types.Message):
+
+    global auto_select_symbol
+    global open_position
 
     if not message.text:
         return
@@ -1091,7 +1094,7 @@ async def text_router(message: types.Message):
         )
 
     elif "авто монета" in text:
-        global auto_select_symbol
+        
 
         auto_select_symbol = not auto_select_symbol
         save_state()
@@ -1119,7 +1122,7 @@ async def text_router(message: types.Message):
         await show_pnl(message)
 
     elif "сброс" in text:
-        global open_position
+        
 
         open_position = None
         save_state()
