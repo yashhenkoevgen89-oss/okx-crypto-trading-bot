@@ -1080,8 +1080,55 @@ async def text_router(message: types.Message):
 
     text = message.text.lower().strip()
 
+    # Сначала специальные команды
 
-    if "статус" in text:
+    if "авто статус" in text:
+        await message.answer(
+            f"🤖 Автостатус\n\n"
+            f"Автоторговля: {'включена ✅' if autotrade_enabled else 'выключена ❌'}\n"
+            f"Автовыбор монеты: {'включён ✅' if auto_select_symbol else 'выключен ❌'}\n"
+            f"Текущая монета: {current_trade_symbol}"
+        )
+
+    elif "авто монета" in text:
+        global auto_select_symbol
+
+        auto_select_symbol = not auto_select_symbol
+        save_state()
+
+        await message.answer(
+            f"🧠 Автовыбор монеты: {'включён ✅' if auto_select_symbol else 'выключен ❌'}"
+        )
+
+    elif "текущая монета" in text:
+        await show_current_symbol(message)
+
+    elif "авто вкл" in text:
+        await autotrade_on(message)
+
+    elif "авто выкл" in text:
+        await autotrade_off(message)
+
+    elif "топ-3" in text or "топ3" in text:
+        await show_top3(message)
+
+    elif "позиция" in text:
+        await show_position(message)
+
+    elif "pnl" in text:
+        await show_pnl(message)
+
+    elif "сброс" in text:
+        global open_position
+
+        open_position = None
+        save_state()
+
+        await message.answer("♻️ Позиция сброшена.")
+
+    # Потом обычные команды
+
+    elif "статус" in text:
         await show_status(message)
 
     elif "баланс" in text:
@@ -1099,15 +1146,6 @@ async def text_router(message: types.Message):
     elif "лучшая" in text:
         await show_best(message)
 
-    elif "топ-3" in text or "топ3" in text:
-        await show_top3(message)
-
-    elif "позиция" in text:
-        await show_position(message)
-
-    elif "pnl" in text:
-        await show_pnl(message)
-
     elif "купить" in text:
         await do_demo_buy(message)
 
@@ -1123,61 +1161,8 @@ async def text_router(message: types.Message):
     elif "риск" in text:
         await show_risk(message)
 
-    elif "авто вкл" in text:
-        await autotrade_on(message)
-
-    elif "авто выкл" in text:
-        await autotrade_off(message)
-
-    elif "авто монета" in text:
-
-        global auto_select_symbol
-
-        auto_select_symbol = not auto_select_symbol
-
-        save_state()
-
-        await message.answer(
-            f"🧠 Автовыбор монеты: "
-            f"{'включён ✅' if auto_select_symbol else 'выключен ❌'}"
-        )
-
-    elif "текущая монета" in text:
-
-        await show_current_symbol(message)
-
-    elif "авто статус" in text:
-
-        await message.answer(
-
-            f"🤖 Автостатус\n\n"
-
-            f"Автоторговля: "
-            f"{'включена ✅' if autotrade_enabled else 'выключена ❌'}\n"
-
-            f"Автовыбор монеты: "
-            f"{'включён ✅' if auto_select_symbol else 'выключен ❌'}\n"
-
-            f"Текущая монета: "
-            f"{current_trade_symbol}"
-        )
-
-    elif "сброс" in text:
-
-        global open_position
-
-        open_position = None
-
-        save_state()
-
-        await message.answer(
-            "♻️ Позиция сброшена."
-        )
-
     else:
-
-        await message.answer(
-            "❓ Команда не распознана.\n\nНажми /старт"
+        await message.answer("❓ Команда не распознана.\n\nНажми /старт"
         )
 
 
