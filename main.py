@@ -544,7 +544,7 @@ async def do_demo_sell(message: types.Message):
 async def autotrade_loop(chat_id):
     global autotrade_enabled
 
-    while autotrade_enabled:
+while autotrade_enabled:
     try:
         if not is_demo():
             autotrade_enabled = False
