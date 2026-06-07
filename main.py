@@ -73,7 +73,7 @@ keyboard = ReplyKeyboardMarkup(
         [KeyboardButton(text="📡 Сигнал"), KeyboardButton(text="🌐 Рынок")],
         [KeyboardButton(text="🔎 Сканер"), KeyboardButton(text="🏆 Лучшая")],
         [KeyboardButton(text="🟢 Купить DEMO"), KeyboardButton(text="🔴 Продать DEMO")],
-        [[KeyboardButton(text="🟢 Авто ВКЛ"), KeyboardButton(text="🔴 Авто ВЫКЛ")],
+        [KeyboardButton(text="🟢 Авто ВКЛ"), KeyboardButton(text="🔴 Авто ВЫКЛ")],
         [KeyboardButton(text="🧠 Авто монета"), KeyboardButton(text="💱 Текущая монета")],
         [KeyboardButton(text="🤖 Авто статус"), KeyboardButton(text="🛡 Риск")],
         [KeyboardButton(text="📜 История"), KeyboardButton(text="📈 Статистика")]
