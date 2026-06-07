@@ -812,9 +812,9 @@ async def text_router(message: types.Message):
 
     if "авто монета" in text or "авто_монета" in text:
     await auto_coin_toggle(message)
-elif "текущая монета" in text or "текущая_монета" in text:
+    elif "текущая монета" in text or "текущая_монета" in text:
     await show_current_symbol(message)
-elif "авто вкл" in text or "авто_вкл" in text:
+    elif "авто вкл" in text or "авто_вкл" in text:
     await autotrade_on(message)
     elif "авто выкл" in text or "авто_выкл" in text:
         await autotrade_off(message)
