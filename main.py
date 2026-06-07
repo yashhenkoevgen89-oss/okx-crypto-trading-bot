@@ -1,4 +1,4 @@
-гоimport os
+import os
 import json
 import asyncio
 from datetime import datetime
