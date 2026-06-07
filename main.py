@@ -554,8 +554,20 @@ async def autotrade_loop(chat_id):
                 )
                 return
 
-            decision = multi_timeframe_decision_for_symbol(trade_symbol)
+                       trade_symbol = TRADE_SYMBOL
 
+            if auto_select_symbol:
+                trade_symbol, best_data = choose_best_symbol()
+
+                await bot.send_message(
+                    chat_id,
+                    f"🧠 Автовыбор монеты\n\n"
+                    f"Выбрана: {trade_symbol}\n"
+                    f"Сигнал: {best_data['signal'] if best_data else 'нет'}\n"
+                    f"Сила: {best_data['score'] if best_data else 0}%"
+                ) 
+             decision = multi_timeframe_decision_for_symbol(trade_symbol)
+            
             if decision["signal"] == "BUY":
                 amount = min(
                     risk_settings["amount_usdt"],
@@ -564,7 +576,7 @@ async def autotrade_loop(chat_id):
 
                 order = place_demo_buy(
                     trade_api=trade_api,
-                    symbol=TRADE_SYMBOL,
+                    symbol=trade_symbol,
                     amount_usdt=amount,
                     okx_flag=OKX_FLAG
                 )
@@ -579,7 +591,7 @@ async def autotrade_loop(chat_id):
 
                 add_trade(
                     now(),
-                    TRADE_SYMBOL,
+                    trade_symbol,
                     "BUY",
                     decision["price"],
                     0,
@@ -591,7 +603,7 @@ async def autotrade_loop(chat_id):
                 await bot.send_message(
                     chat_id,
                     f"🟢 AUTO DEMO BUY\n\n"
-                    f"Пара: {TRADE_SYMBOL}\n"
+                    f"Пара: {trade_symbol}\n"
                     f"Цена: {decision['price']:.2f}\n"
                     f"Сила: {decision['avg_score']}%\n\n"
                     f"Ответ OKX:\n{order}"
