@@ -330,7 +330,7 @@ async def show_signal(message: types.Message):
 
 async def show_market(message: types.Message):
     try:
-        decision = multi_timeframe_decision()
+        decision = multi_timeframe_decision_for_symbol(TRADE_SYMBOL)()
 
         text = f"🌐 Мультианализ {TRADE_SYMBOL}\n\n"
 
