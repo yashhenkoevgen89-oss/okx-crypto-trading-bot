@@ -570,10 +570,9 @@ while autotrade_enabled:
         decision = multi_timeframe_decision_for_symbol(trade_symbol)
 
         if decision["signal"] == "BUY":
-            ...
-                amount = min(
-                    risk_settings["amount_usdt"],
-                    risk_settings["max_amount_usdt"]
+            amount = min(
+                risk_settings["amount_usdt"],
+                risk_settings["max_amount_usdt"]
                 )
 
                 order = place_demo_buy(
