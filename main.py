@@ -403,6 +403,7 @@ async def show_current_symbol(message: types.Message):
         f"Основная пара: {TRADE_SYMBOL}\n"
         f"Торговая пара сейчас: {current_trade_symbol}\n"
         f"Автовыбор монеты: {'включён ✅' if auto_select_symbol else 'выключен ❌'}"
+    )
     async def show_risk(message: types.Message):
     await message.answer(
         f"🛡 Риск\n\n"
