@@ -38,7 +38,7 @@ BUY_SCORE = int(os.getenv("BUY_SCORE", "68"))
 SELL_SCORE = int(os.getenv("SELL_SCORE", "35"))
 
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "3"))
-MAX_TRADES_DAY = int(os.getenv("MAX_TRADES_DAY", "10"))
+MAX_TRADES_DAY = int(os.getenv("MAX_TRADES_DAY", "20"))
 MAX_DAILY_LOSS_PERCENT = float(os.getenv("MAX_DAILY_LOSS_PERCENT", "5"))
 
 TIMEFRAMES = ["5m", "15m", "1H"]
@@ -112,6 +112,10 @@ risk_settings = {
     "max_open_positions": MAX_OPEN_POSITIONS,
     "max_trades_day": MAX_TRADES_DAY,
     "max_daily_loss_percent": MAX_DAILY_LOSS_PERCENT,
+    "auto_amount_enabled": True,
+    "balance_usage_percent": 10.0,
+    "min_trade_usdt": 5.0,
+    "max_trade_usdt": 25.0,
 }
 
 
@@ -162,6 +166,59 @@ def safe_float(value, default=0.0):
         return float(value)
     except Exception:
         return default
+def get_trading_usdt_balance():
+    try:
+        result = account_api.get_account_balance()
+        details = result.get("data", [{}])[0].get("details", [])
+
+        for item in details:
+            if item.get("ccy") == "USDT":
+                return safe_float(
+                    item.get("availBal")
+                    or item.get("cashBal")
+                )
+
+        return 0.0
+
+    except Exception:
+        return 0.0
+
+
+def get_trade_amount_usdt():
+
+    if not risk_settings.get(
+        "auto_amount_enabled",
+        True
+    ):
+        return min(
+            risk_settings["amount_usdt"],
+            risk_settings["max_amount_usdt"]
+        )
+
+    balance = get_trading_usdt_balance()
+
+    calculated = (
+        balance
+        * risk_settings["balance_usage_percent"]
+        / 100
+    )
+
+    calculated = max(
+        calculated,
+        risk_settings["min_trade_usdt"]
+    )
+
+    calculated = min(
+        calculated,
+        risk_settings["max_trade_usdt"]
+    )
+
+    calculated = min(
+        calculated,
+        risk_settings["max_amount_usdt"]
+    )
+
+    return round(calculated, 2)
 
 
 # =========================
@@ -711,7 +768,6 @@ def add_indicators(df):
 # =========================
 # MARKET DATA / SIGNALS
 # =========================
-
 def calculate_score(data):
     score = 50
 
@@ -727,42 +783,81 @@ def calculate_score(data):
     vol_avg = data["vol_avg"]
     bb_upper = data["bb_upper"]
     bb_lower = data["bb_lower"]
+    atr = data.get("atr", 0)
 
     if ema9 > ema21:
-        score += 10
+        score += 12
     else:
-        score -= 10
+        score -= 12
+
+    if ema21 > ema50:
+        score += 8
+    else:
+        score -= 8
 
     if ema50 > ema200:
         score += 15
     else:
         score -= 15
 
-    if close > ema50:
+    if close > ema9:
         score += 5
     else:
         score -= 5
 
-    if macd > macd_signal:
-        score += 10
+    if close > ema50:
+        score += 7
     else:
-        score -= 10
+        score -= 7
 
-    if rsi < 30:
-        score += 15
-    elif rsi > 70:
-        score -= 15
-    elif 45 <= rsi <= 60:
-        score += 5
+    if macd > macd_signal:
+        score += 12
+    else:
+        score -= 12
 
-    if vol_avg > 0 and vol > vol_avg:
+    if macd > 0:
         score += 5
+    else:
+        score -= 5
+
+    if rsi < 25:
+        score += 8
+    elif 25 <= rsi < 35:
+        score += 12
+    elif 35 <= rsi <= 60:
+        score += 8
+    elif 60 < rsi <= 70:
+        score += 2
+    elif rsi > 75:
+        score -= 18
+    else:
+        score -= 5
+
+    if vol_avg > 0:
+        volume_ratio = vol / vol_avg
+
+        if volume_ratio >= 1.8:
+            score += 10
+        elif volume_ratio >= 1.2:
+            score += 6
+        elif volume_ratio < 0.7:
+            score -= 8
 
     if bb_lower > 0 and close <= bb_lower:
-        score += 10
+        score += 8
 
     if bb_upper > 0 and close >= bb_upper:
         score -= 10
+
+    if atr > 0 and close > 0:
+        atr_percent = atr / close * 100
+
+        if 0.2 <= atr_percent <= 3.5:
+            score += 5
+        elif atr_percent < 0.1:
+            score -= 8
+        elif atr_percent > 6:
+            score -= 10
 
     score = max(0, min(100, int(score)))
 
@@ -1163,10 +1258,7 @@ async def do_demo_buy(message):
 
     signal_data = build_signal(symbol)
 
-    amount = min(
-        risk_settings["amount_usdt"],
-        risk_settings["max_amount_usdt"]
-    )
+    amount = get_trade_amount_usdt()
 
     open_position(
         symbol,
@@ -1259,10 +1351,7 @@ async def do_live_buy(message):
 
     signal_data = build_signal(symbol)
 
-    amount = min(
-        risk_settings["amount_usdt"],
-        risk_settings["max_amount_usdt"]
-    )
+    amount = get_trade_amount_usdt()
 
     result = place_market_buy(
         symbol,
@@ -1488,10 +1577,7 @@ async def autotrade_loop(chat_id):
                     allowed, reason = can_open_new_position(symbol)
 
                     if allowed:
-                        amount = min(
-                            risk_settings["amount_usdt"],
-                            risk_settings["max_amount_usdt"]
-                        )
+                        amount = get_trade_amount_usdt()
 
                         if not is_demo():
                             place_market_buy(
