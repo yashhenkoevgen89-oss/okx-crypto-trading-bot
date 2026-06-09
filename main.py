@@ -2185,6 +2185,23 @@ async def text_router(message: types.Message):
 
     elif "авто статус" in text:
         await show_auto_status(message)
+    elif "авто монета" in text:
+
+        global auto_select_symbol
+
+        auto_select_symbol = not auto_select_symbol
+
+        save_runtime_settings()
+
+        await message.answer(
+
+            f"🧠 Авто монета\n\n"
+
+            f"Автовыбор монеты: "
+            f"{'✅ ВКЛ' if auto_select_symbol else '❌ ВЫКЛ'}",
+
+            reply_markup=keyboard
+        )
 
     elif "текущая" in text:
         await show_current_symbol(message)
