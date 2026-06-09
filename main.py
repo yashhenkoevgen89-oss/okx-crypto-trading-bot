@@ -583,16 +583,15 @@ def get_okx_real_spot_assets():
             if symbol not in WATCHLIST:
                 continue
 
-            assets[symbol] = {
-                "currency": ccy,
-                "balance": balance,
-                "available": available,
-            }
+            try:
+                price = build_signal(symbol, "15m")["price"]
+                value_usdt = balance * price
 
-        return assets
+            if value_usdt < 5:
+                continue
 
-    except Exception:
-        return assets
+            except Exception:
+                continue
 
 
 def sync_positions_with_okx():
