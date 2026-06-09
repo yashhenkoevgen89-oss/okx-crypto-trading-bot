@@ -129,7 +129,6 @@ keyboard = ReplyKeyboardMarkup(
         [KeyboardButton(text="📡 Сигнал"), KeyboardButton(text="🌐 Рынок")],
         [KeyboardButton(text="🔎 Сканер"), KeyboardButton(text="🏆 Лучшая")],
         [KeyboardButton(text="🥇 Топ-3"), KeyboardButton(text="📋 Позиции")],
-        [KeyboardButton(text="🟢 Купить LIVE"), KeyboardButton(text="🔴 Продать LIVE")],
         [KeyboardButton(text="🟢 Авто ВКЛ"), KeyboardButton(text="🔴 Авто ВЫКЛ")],
         [KeyboardButton(text="🧠 Авто монета"), KeyboardButton(text="💱 Текущая монета")],
         [KeyboardButton(text="🤖 Авто статус"), KeyboardButton(text="🛡 Риск")],
@@ -2196,17 +2195,70 @@ async def show_current_symbol(message):
 
 @dp.message(Command(commands=["start"]))
 async def start_cmd(message: types.Message):
+    db_set("report_chat_id", message.chat.id)
 
     await message.answer(
-        "🤖 OKX ULTRA PRO MAX V5 запущен",
+        "🤖 OKX ULTRA PRO MAX V5 запущен\n\n"
+        "Ручные кнопки BUY/SELL убраны.\n"
+        "DEMO-команды отключены.\n"
+        "Автоотчеты включены.",
         reply_markup=keyboard
     )
+
+
+async def auto_reports_loop():
+    while True:
+        try:
+            chat_id = db_get("report_chat_id")
+
+            if chat_id:
+                current_time = datetime.now().strftime("%H:%M")
+                today = today_str()
+
+                if current_time == "23:55":
+                    last_daily = db_get("last_daily_report")
+
+                    if last_daily != today:
+                        await bot.send_message(
+                            chat_id,
+                            build_period_report("📅 Автоотчет за день", "day")
+                        )
+                        db_set("last_daily_report", today)
+
+                if date.today().weekday() == 6 and current_time == "23:57":
+                    week_key = datetime.now().strftime("%Y-%W")
+                    last_weekly = db_get("last_weekly_report")
+
+                    if last_weekly != week_key:
+                        await bot.send_message(
+                            chat_id,
+                            build_period_report("🗓 Автоотчет за неделю", "week")
+                        )
+                        db_set("last_weekly_report", week_key)
+
+                if date.today().day == 1 and current_time == "00:05":
+                    month_key = datetime.now().strftime("%Y-%m")
+                    last_monthly = db_get("last_monthly_report")
+
+                    if last_monthly != month_key:
+                        await bot.send_message(
+                            chat_id,
+                            build_period_report("📆 Автоотчет за месяц", "month")
+                        )
+                        db_set("last_monthly_report", month_key)
+
+        except Exception:
+            pass
+
+        await asyncio.sleep(60)
 
 
 @dp.message()
 async def text_router(message: types.Message):
     global autotrade_enabled
     global auto_select_symbol
+
+    db_set("report_chat_id", message.chat.id)
 
     text = message.text.lower().strip() if message.text else ""
 
@@ -2271,13 +2323,14 @@ async def text_router(message: types.Message):
     elif "текущая" in text:
         await show_current_symbol(message)
 
-    elif "купить live" in text:
-        await do_live_buy(message)
-
-    elif "продать live" in text:
-        await do_live_sell(message)
-
     elif "авто вкл" in text:
+        if autotrade_enabled:
+            await message.answer(
+                "🟢 Автоторговля уже включена",
+                reply_markup=keyboard
+            )
+            return
+
         autotrade_enabled = True
         save_runtime_settings()
 
@@ -2316,6 +2369,13 @@ async def text_router(message: types.Message):
             reply_markup=keyboard
         )
 
+    elif "купить" in text or "продать" in text or "demo" in text:
+        await message.answer(
+            "⛔ Ручная покупка/продажа и DEMO-команды отключены.\n"
+            "Бот работает только через автоторговлю.",
+            reply_markup=keyboard
+        )
+
     else:
         await message.answer(
             "❓ Команда не распознана",
@@ -2324,12 +2384,11 @@ async def text_router(message: types.Message):
 
 
 async def main():
-
     init_db()
-
     load_runtime_settings()
-
     sync_positions_with_okx()
+
+    asyncio.create_task(auto_reports_loop())
 
     print("OKX ULTRA PRO MAX V5 STARTED")
 
@@ -2337,5 +2396,4 @@ async def main():
 
 
 if __name__ == "__main__":
-
     asyncio.run(main())
