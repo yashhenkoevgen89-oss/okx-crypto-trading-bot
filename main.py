@@ -135,6 +135,7 @@ keyboard = ReplyKeyboardMarkup(
         [KeyboardButton(text="🤖 Авто статус"), KeyboardButton(text="🛡 Риск")],
         [KeyboardButton(text="📜 История"), KeyboardButton(text="📈 Статистика")],
         [KeyboardButton(text="💹 PnL"), KeyboardButton(text="📅 Дневной отчет")],
+        [KeyboardButton(text="🗓 Недельный отчет"), KeyboardButton(text="📆 Месячный отчет")],
         [KeyboardButton(text="🔄 Синхронизация OKX"), KeyboardButton(text="♻️ Сброс позиций")],
     ],
     resize_keyboard=True,
