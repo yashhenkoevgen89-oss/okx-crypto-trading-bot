@@ -1193,10 +1193,18 @@ def place_market_sell(symbol, amount_usdt, price):
     if real_balance <= 0:
         raise Exception(f"{symbol} отсутствует на OKX")
 
-    sell_size = format(real_balance, ".8f").rstrip("0").rstrip(".")
+    order_value = real_balance * price
 
-    if not sell_size or sell_size == "0":
-        raise Exception(f"Некорректный размер продажи {symbol}: {real_balance}")
+    if order_value < 5:
+        delete_open_position(symbol)
+        sell_signal_locks.discard(symbol)
+        raise Exception(
+            f"{symbol} меньше минимального ордера OKX. "
+            f"Стоимость: {order_value:.4f} USDT. "
+            f"Позиция удалена из базы как остаток."
+        )
+
+    sell_size = format(real_balance, ".8f").rstrip("0").rstrip(".")
 
     result = trade_api.place_order(
         instId=symbol,
@@ -1205,11 +1213,6 @@ def place_market_sell(symbol, amount_usdt, price):
         ordType="market",
         sz=sell_size
     )
-
-    if not result or result.get("code") != "0":
-        raise Exception(f"OKX отклонил продажу {symbol}: {result}")
-
-    return result
 
     if not result or result.get("code") != "0":
         raise Exception(f"OKX отклонил продажу {symbol}: {result}")
