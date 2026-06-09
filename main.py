@@ -587,11 +587,22 @@ def get_okx_real_spot_assets():
                 price = build_signal(symbol, "15m")["price"]
                 value_usdt = balance * price
 
-            if value_usdt < 5:
-                continue
+                if value_usdt < 5:
+                    continue
 
             except Exception:
                 continue
+
+            assets[symbol] = {
+                "currency": ccy,
+                "balance": balance,
+                "available": available,
+            }
+
+        return assets
+
+    except Exception:
+        return assets
 
 
 def sync_positions_with_okx():
