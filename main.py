@@ -2200,7 +2200,7 @@ async def start_cmd(message: types.Message):
     )
 
 
-@@dp.message()
+@dp.message()
 async def text_router(message: types.Message):
     global autotrade_enabled
     global auto_select_symbol
