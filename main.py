@@ -2088,17 +2088,67 @@ async def show_pnl(message):
     )
 
 
-async def show_daily_report(message):
+def build_period_report(title, period):
 
-    stats = calculate_okx_real_stats(True)
+    stats = calculate_okx_real_stats(period)
+    closed = stats["closed"]
 
-    await message.answer(
-        f"📅 Отчет за день\n\n"
-        f"Закрытых сделок: {stats['trades']}\n"
+    symbol_pnl = {}
+
+    for trade in closed:
+        symbol = trade["symbol"]
+        pnl = trade["pnl_usdt"]
+
+        symbol_pnl.setdefault(symbol, 0)
+        symbol_pnl[symbol] += pnl
+
+    best_symbol = "-"
+    worst_symbol = "-"
+    best_profit = 0.0
+    worst_profit = 0.0
+
+    if symbol_pnl:
+        best_symbol = max(symbol_pnl, key=symbol_pnl.get)
+        worst_symbol = min(symbol_pnl, key=symbol_pnl.get)
+
+        best_profit = symbol_pnl[best_symbol]
+        worst_profit = symbol_pnl[worst_symbol]
+
+    return (
+        f"{title}\n\n"
+        f"Сделок: {stats['trades']}\n"
         f"Прибыльных: {stats['wins']}\n"
+        f"Убыточных: {stats['losses']}\n"
         f"WinRate: {stats['winrate']:.2f}%\n\n"
         f"Прибыль:\n"
-        f"{stats['pnl_usdt']:.4f} USDT",
+        f"{stats['pnl_usdt']:.4f} USDT\n\n"
+        f"🏆 Лучшая монета:\n"
+        f"{best_symbol} ({best_profit:.4f} USDT)\n\n"
+        f"📉 Худшая монета:\n"
+        f"{worst_symbol} ({worst_profit:.4f} USDT)"
+    )
+
+
+async def show_daily_report(message):
+
+    await message.answer(
+        build_period_report("📅 Отчет за день", "day"),
+        reply_markup=keyboard
+    )
+
+
+async def show_weekly_report(message):
+
+    await message.answer(
+        build_period_report("🗓 Отчет за неделю", "week"),
+        reply_markup=keyboard
+    )
+
+
+async def show_monthly_report(message):
+
+    await message.answer(
+        build_period_report("📆 Отчет за месяц", "month"),
         reply_markup=keyboard
     )
 
@@ -2187,7 +2237,13 @@ async def text_router(message: types.Message):
     elif "pnl" in text:
         await show_pnl(message)
 
-    elif "отчет" in text or "отчёт" in text:
+    elif "недель" in text:
+        await show_weekly_report(message)
+
+    elif "месяч" in text or "месяц" in text:
+        await show_monthly_report(message)
+
+    elif "дневной отчет" in text:
         await show_daily_report(message)
 
     elif "риск" in text:
