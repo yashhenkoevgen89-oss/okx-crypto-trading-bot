@@ -2092,15 +2092,19 @@ async def show_pnl(message):
 def build_period_report(title, period):
 
     stats = calculate_okx_real_stats(period)
-    closed = stats["closed"]
+    closed = stats.get("closed", [])
+
+    trades = stats.get("trades", 0)
+    wins = stats.get("wins", 0)
+    losses = stats.get("losses", trades - wins)
 
     symbol_pnl = {}
 
     for trade in closed:
-        symbol = trade["symbol"]
-        pnl = trade["pnl_usdt"]
+        symbol = trade.get("symbol", "-")
+        pnl = trade.get("pnl_usdt", 0.0)
 
-        symbol_pnl.setdefault(symbol, 0)
+        symbol_pnl.setdefault(symbol, 0.0)
         symbol_pnl[symbol] += pnl
 
     best_symbol = "-"
@@ -2111,18 +2115,17 @@ def build_period_report(title, period):
     if symbol_pnl:
         best_symbol = max(symbol_pnl, key=symbol_pnl.get)
         worst_symbol = min(symbol_pnl, key=symbol_pnl.get)
-
         best_profit = symbol_pnl[best_symbol]
         worst_profit = symbol_pnl[worst_symbol]
 
     return (
         f"{title}\n\n"
-        f"Сделок: {stats['trades']}\n"
-        f"Прибыльных: {stats['wins']}\n"
-        f"Убыточных: {stats['losses']}\n"
-        f"WinRate: {stats['winrate']:.2f}%\n\n"
+        f"Сделок: {trades}\n"
+        f"Прибыльных: {wins}\n"
+        f"Убыточных: {losses}\n"
+        f"WinRate: {stats.get('winrate', 0):.2f}%\n\n"
         f"Прибыль:\n"
-        f"{stats['pnl_usdt']:.4f} USDT\n\n"
+        f"{stats.get('pnl_usdt', 0):.4f} USDT\n\n"
         f"🏆 Лучшая монета:\n"
         f"{best_symbol} ({best_profit:.4f} USDT)\n\n"
         f"📉 Худшая монета:\n"
