@@ -1810,6 +1810,109 @@ async def disable_autotrade(message):
     await message.answer(
         "🔴 Автоторговля выключена."
     )
+def get_okx_fills(limit=100):
+    try:
+        result = trade_api.get_fills(
+            instType="SPOT",
+            limit=str(limit)
+        )
+        return result.get("data", [])
+    except Exception:
+        return []
+
+
+def calculate_okx_real_stats(only_today=False):
+    fills = get_okx_fills(100)
+
+    fills = sorted(
+        fills,
+        key=lambda x: int(x.get("ts", 0))
+    )
+
+    buys = {}
+    closed = []
+
+    for fill in fills:
+        symbol = fill.get("instId")
+        side = fill.get("side")
+        price = safe_float(fill.get("fillPx"))
+        qty = safe_float(fill.get("fillSz"))
+        fee = abs(safe_float(fill.get("fee")))
+        fee_ccy = fill.get("feeCcy")
+        ts = int(fill.get("ts", 0))
+
+        fill_date = datetime.fromtimestamp(ts / 1000).date().isoformat()
+
+        if only_today and fill_date != today_str():
+            continue
+
+        base_ccy = symbol_to_currency(symbol)
+
+        fee_usdt = 0.0
+        if fee_ccy == "USDT":
+            fee_usdt = fee
+        elif fee_ccy == base_ccy:
+            fee_usdt = fee * price
+
+        if side == "buy":
+            buys.setdefault(symbol, [])
+            buys[symbol].append({
+                "qty": qty,
+                "price": price,
+                "fee_usdt": fee_usdt
+            })
+
+        elif side == "sell":
+            sell_qty = qty
+            sell_price = price
+            total_pnl = 0.0
+            total_cost = 0.0
+
+            while sell_qty > 0 and buys.get(symbol):
+                lot = buys[symbol][0]
+
+                used_qty = min(sell_qty, lot["qty"])
+
+                buy_cost = used_qty * lot["price"]
+                sell_value = used_qty * sell_price
+
+                pnl = sell_value - buy_cost
+
+                pnl -= lot["fee_usdt"] * (used_qty / lot["qty"])
+                pnl -= fee_usdt * (used_qty / qty)
+
+                total_pnl += pnl
+                total_cost += buy_cost
+
+                lot["qty"] -= used_qty
+                sell_qty -= used_qty
+
+                if lot["qty"] <= 0:
+                    buys[symbol].pop(0)
+
+            if total_cost > 0:
+                closed.append({
+                    "symbol": symbol,
+                    "pnl_usdt": total_pnl,
+                    "pnl_percent": total_pnl / total_cost * 100
+                })
+
+    total_pnl = sum(x["pnl_usdt"] for x in closed)
+    total_percent = sum(x["pnl_percent"] for x in closed)
+
+    wins = len([x for x in closed if x["pnl_usdt"] > 0])
+    total = len(closed)
+
+    win_rate = wins / total * 100 if total > 0 else 0.0
+
+    return {
+        "trades": total,
+        "wins": wins,
+        "winrate": win_rate,
+        "pnl_usdt": total_pnl,
+        "pnl_percent": total_percent,
+        "closed": closed
+    }
 # =========================
 # SHOW FUNCTIONS
 # =========================
@@ -1981,13 +2084,40 @@ async def show_pnl(message):
 
 
 async def show_statistics(message):
-    trades = get_closed_trades()
+    stats = calculate_okx_real_stats(False)
 
     await message.answer(
-        f"📈 Статистика\n\n"
-        f"Сделок: {len(trades)}\n\n"
-        f"WinRate: {winrate():.2f}%\n\n"
-        f"Прибыль:\n{total_pnl_usdt():.2f} USDT",
+        f"📈 Статистика OKX\n\n"
+        f"Закрытых сделок: {stats['trades']}\n"
+        f"Прибыльных: {stats['wins']}\n"
+        f"WinRate: {stats['winrate']:.2f}%\n\n"
+        f"Прибыль:\n"
+        f"{stats['pnl_usdt']:.4f} USDT",
+        reply_markup=keyboard
+    )
+
+
+async def show_pnl(message):
+    stats = calculate_okx_real_stats(False)
+
+    await message.answer(
+        f"💹 PnL OKX\n\n"
+        f"{stats['pnl_percent']:.2f}%\n\n"
+        f"{stats['pnl_usdt']:.4f} USDT",
+        reply_markup=keyboard
+    )
+
+
+async def show_daily_report(message):
+    stats = calculate_okx_real_stats(True)
+
+    await message.answer(
+        f"📅 Отчет за день OKX\n\n"
+        f"Закрытых сделок: {stats['trades']}\n"
+        f"Прибыльных: {stats['wins']}\n"
+        f"WinRate: {stats['winrate']:.2f}%\n\n"
+        f"Прибыль:\n"
+        f"{stats['pnl_usdt']:.4f} USDT",
         reply_markup=keyboard
     )
 
