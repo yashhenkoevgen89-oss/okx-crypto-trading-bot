@@ -1185,7 +1185,6 @@ def place_market_buy(symbol, amount_usdt):
 
 
 def place_market_sell(symbol, amount_usdt, price):
-
     if not is_live_allowed():
         raise Exception("LIVE торговля запрещена")
 
@@ -1194,13 +1193,23 @@ def place_market_sell(symbol, amount_usdt, price):
     if real_balance <= 0:
         raise Exception(f"{symbol} отсутствует на OKX")
 
+    sell_size = format(real_balance, ".8f").rstrip("0").rstrip(".")
+
+    if not sell_size or sell_size == "0":
+        raise Exception(f"Некорректный размер продажи {symbol}: {real_balance}")
+
     result = trade_api.place_order(
         instId=symbol,
         tdMode="cash",
         side="sell",
         ordType="market",
-        sz=str(round(real_balance, 8))
+        sz=sell_size
     )
+
+    if not result or result.get("code") != "0":
+        raise Exception(f"OKX отклонил продажу {symbol}: {result}")
+
+    return result
 
     if not result or result.get("code") != "0":
         raise Exception(f"OKX отклонил продажу {symbol}: {result}")
