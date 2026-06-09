@@ -2200,8 +2200,10 @@ async def start_cmd(message: types.Message):
     )
 
 
-@dp.message()
+@@dp.message()
 async def text_router(message: types.Message):
+    global autotrade_enabled
+    global auto_select_symbol
 
     text = message.text.lower().strip() if message.text else ""
 
@@ -2244,7 +2246,7 @@ async def text_router(message: types.Message):
     elif "месяч" in text or "месяц" in text:
         await show_monthly_report(message)
 
-    elif "дневной отчет" in text:
+    elif "дневной" in text or "день" in text:
         await show_daily_report(message)
 
     elif "риск" in text:
@@ -2252,21 +2254,14 @@ async def text_router(message: types.Message):
 
     elif "авто статус" in text:
         await show_auto_status(message)
+
     elif "авто монета" in text:
-
-        global auto_select_symbol
-
         auto_select_symbol = not auto_select_symbol
-
         save_runtime_settings()
 
         await message.answer(
-
             f"🧠 Авто монета\n\n"
-
-            f"Автовыбор монеты: "
-            f"{'✅ ВКЛ' if auto_select_symbol else '❌ ВЫКЛ'}",
-
+            f"Автовыбор монеты: {'✅ ВКЛ' if auto_select_symbol else '❌ ВЫКЛ'}",
             reply_markup=keyboard
         )
 
@@ -2280,10 +2275,8 @@ async def text_router(message: types.Message):
         await do_live_sell(message)
 
     elif "авто вкл" in text:
-
-        global autotrade_enabled
-
         autotrade_enabled = True
+        save_runtime_settings()
 
         asyncio.create_task(
             autotrade_loop(message.chat.id)
@@ -2295,8 +2288,8 @@ async def text_router(message: types.Message):
         )
 
     elif "авто выкл" in text:
-
         autotrade_enabled = False
+        save_runtime_settings()
 
         await message.answer(
             "🔴 Автоторговля выключена",
@@ -2304,7 +2297,6 @@ async def text_router(message: types.Message):
         )
 
     elif "синхронизация" in text:
-
         sync_positions_with_okx()
 
         await message.answer(
@@ -2313,9 +2305,7 @@ async def text_router(message: types.Message):
         )
 
     elif "сброс" in text:
-
         clear_open_positions()
-
         sync_positions_with_okx()
 
         await message.answer(
@@ -2324,7 +2314,6 @@ async def text_router(message: types.Message):
         )
 
     else:
-
         await message.answer(
             "❓ Команда не распознана",
             reply_markup=keyboard
