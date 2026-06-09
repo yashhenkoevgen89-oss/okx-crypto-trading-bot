@@ -590,51 +590,53 @@ def get_account_details():
 
 def get_trading_usdt_balance():
     try:
-        details = get_account_details()
-
-        for item in details:
+        for item in get_account_details():
             if item.get("ccy") == "USDT":
                 return safe_float(item.get("availBal") or item.get("cashBal"))
-
         return 0.0
-
     except Exception:
         return 0.0
 
 
 def get_trade_amount_usdt():
-    if not risk_settings.get("auto_amount_enabled", True):
-        return min(
-            risk_settings["amount_usdt"],
-            risk_settings["max_amount_usdt"]
-        )
-
     balance = get_trading_usdt_balance()
 
-    calculated = balance * risk_settings["balance_usage_percent"] / 100
+    if not risk_settings.get("auto_amount_enabled", True):
+        return min(risk_settings["amount_usdt"], risk_settings["max_amount_usdt"])
 
-    calculated = max(calculated, risk_settings["min_trade_usdt"])
-    calculated = min(calculated, risk_settings["max_trade_usdt"])
-    calculated = min(calculated, risk_settings["max_amount_usdt"])
+    amount = balance * risk_settings["balance_usage_percent"] / 100
+    amount = max(amount, risk_settings["min_trade_usdt"])
+    amount = min(amount, risk_settings["max_trade_usdt"])
+    amount = min(amount, risk_settings["max_amount_usdt"])
 
-    return round(calculated, 2)
-
-
-def symbol_to_currency(symbol):
-    return symbol.split("-")[0]
+    return round(amount, 2)
 
 
 def currency_to_symbol(currency):
     return f"{currency}-USDT"
 
 
+def symbol_to_currency(symbol):
+    return symbol.split("-")[0]
+
+
+def get_okx_asset_balance(symbol):
+    currency = symbol_to_currency(symbol)
+
+    try:
+        for item in get_account_details():
+            if item.get("ccy") == currency:
+                return safe_float(item.get("availBal") or item.get("cashBal"))
+        return 0.0
+    except Exception:
+        return 0.0
+
+
 def get_okx_real_spot_assets():
     assets = {}
 
     try:
-        details = get_account_details()
-
-        for item in details:
+        for item in get_account_details():
             ccy = item.get("ccy")
             balance = safe_float(item.get("cashBal"))
             available = safe_float(item.get("availBal"))
@@ -677,26 +679,29 @@ def sync_positions_with_okx():
                 entry_price = signal["price"]
                 amount_usdt = asset["balance"] * entry_price
 
-                stop_loss_price = entry_price * (
-                    1 - risk_settings["stop_loss_percent"] / 100
-                )
-
-                take_profit_price = entry_price * (
-                    1 + risk_settings["take_profit_percent"] / 100
-                )
-
                 save_open_position(
                     symbol,
                     entry_price,
                     amount_usdt,
-                    stop_loss_price,
-                    take_profit_price,
+                    entry_price * (1 - risk_settings["stop_loss_percent"] / 100),
+                    entry_price * (1 + risk_settings["take_profit_percent"] / 100),
                     entry_price,
                 )
 
             except Exception:
                 continue
-      # =========================
+
+
+sell_signal_locks = set()
+
+
+def unlock_missing_positions():
+    real_assets = get_okx_real_spot_assets()
+
+    for symbol in list(sell_signal_locks):
+        if symbol not in real_assets:
+            sell_signal_locks.discard(symbol)
+# =========================
 # INDICATORS
 # =========================
 
@@ -1409,60 +1414,63 @@ def can_open_new_position(
 # MANUAL BUY LIVE
 # =========================
 
-async def do_live_buy(message):
+async def do_live_sell(message):
+    sync_positions_with_okx()
 
-    symbol = current_trade_symbol
+    positions = get_open_positions()
 
-    allowed, reason = (
-        can_open_new_position(
-            symbol
-        )
-    )
-
-    if not allowed:
-
+    if not positions:
         await message.answer(
-            f"⛔ {reason}"
+            "📋 Позиции отсутствуют.",
+            reply_markup=keyboard
         )
-
         return
 
-    signal = build_signal(
-        symbol
-    )
+    symbol = list(positions.keys())[0]
+    position = positions[symbol]
 
-    amount = get_trade_amount_usdt()
+    real_balance = get_okx_asset_balance(symbol)
 
-    result = place_market_buy(
+    if real_balance <= 0:
+        delete_open_position(symbol)
+
+        await message.answer(
+            f"⚠️ {symbol} уже отсутствует на OKX.\n"
+            f"Позиция удалена из базы.",
+            reply_markup=keyboard
+        )
+        return
+
+    signal = build_signal(symbol)
+    price = signal["price"]
+
+    result = place_market_sell(
         symbol,
-        amount
+        position["amount_usdt"],
+        price
     )
 
-    open_position(
+    close_position(
         symbol,
-        signal["price"],
-        amount
+        price,
+        "MANUAL LIVE SELL"
     )
+
+    sync_positions_with_okx()
 
     add_history(
-        "MANUAL LIVE BUY",
+        "MANUAL LIVE SELL",
         symbol,
-        signal["price"],
+        price,
         signal["score"],
         result
     )
 
     await message.answer(
-
-        f"🟢 LIVE BUY\n\n"
-
+        f"🔴 LIVE SELL\n\n"
         f"{symbol}\n"
-
-        f"Цена: "
-        f"{signal['price']:.4f}\n"
-
-        f"Сумма: "
-        f"{amount} USDT"
+        f"Цена: {price:.4f}",
+        reply_markup=keyboard
     )
 
 
@@ -1526,21 +1534,17 @@ async def do_live_sell(message):
 # =========================
 
 async def autotrade_loop(chat_id):
-
     global autotrade_enabled
     global current_trade_symbol
 
     while autotrade_enabled:
-
         try:
-
-            # Синхронизация с реальными активами OKX
             sync_positions_with_okx()
+            unlock_missing_positions()
 
             allowed, reason = can_trade_today()
 
             if not allowed:
-
                 await bot.send_message(
                     chat_id,
                     f"⛔ Автоторговля остановлена\n\n{reason}"
@@ -1548,30 +1552,23 @@ async def autotrade_loop(chat_id):
 
                 autotrade_enabled = False
                 save_runtime_settings()
-
                 break
 
             positions = get_open_positions()
 
-            # =========================
-            # СОПРОВОЖДЕНИЕ ПОЗИЦИЙ
-            # =========================
-
             for symbol, position in positions.items():
-
                 try:
+                    real_balance = get_okx_asset_balance(symbol)
 
-                    signal_data = build_signal(
-                        symbol,
-                        "15m"
-                    )
+                    if real_balance <= 0:
+                        delete_open_position(symbol)
+                        sell_signal_locks.discard(symbol)
+                        continue
 
+                    signal_data = build_signal(symbol, "15m")
                     current_price = signal_data["price"]
 
-                    update_trailing_stop(
-                        symbol,
-                        current_price
-                    )
+                    update_trailing_stop(symbol, current_price)
 
                     positions = get_open_positions()
 
@@ -1581,22 +1578,15 @@ async def autotrade_loop(chat_id):
                     position = positions[symbol]
 
                     pnl_percent = (
-                        (
-                            current_price
-                            - position["entry_price"]
-                        )
-                        /
-                        position["entry_price"]
-                    ) * 100
+                        (current_price - position["entry_price"])
+                        / position["entry_price"]
+                    ) * 100 if position["entry_price"] > 0 else 0
 
-                    # =========================
-                    # TAKE PROFIT
-                    # =========================
+                    if current_price >= position["take_profit_price"]:
+                        if symbol in sell_signal_locks:
+                            continue
 
-                    if (
-                        current_price
-                        >= position["take_profit_price"]
-                    ):
+                        sell_signal_locks.add(symbol)
 
                         place_market_sell(
                             symbol,
@@ -1610,6 +1600,8 @@ async def autotrade_loop(chat_id):
                             "TAKE PROFIT"
                         )
 
+                        sync_positions_with_okx()
+
                         add_history(
                             "AUTO TP",
                             symbol,
@@ -1618,27 +1610,20 @@ async def autotrade_loop(chat_id):
                         )
 
                         await bot.send_message(
-
                             chat_id,
-
                             f"🎯 TAKE PROFIT\n\n"
-
                             f"{symbol}\n"
-
-                            f"PnL: "
-                            f"{pnl_percent:.2f}%"
+                            f"PnL: {pnl_percent:.2f}%"
                         )
 
+                        sell_signal_locks.discard(symbol)
                         continue
 
-                    # =========================
-                    # STOP LOSS
-                    # =========================
+                    if current_price <= position["stop_loss_price"]:
+                        if symbol in sell_signal_locks:
+                            continue
 
-                    if (
-                        current_price
-                        <= position["stop_loss_price"]
-                    ):
+                        sell_signal_locks.add(symbol)
 
                         place_market_sell(
                             symbol,
@@ -1652,6 +1637,8 @@ async def autotrade_loop(chat_id):
                             "STOP LOSS"
                         )
 
+                        sync_positions_with_okx()
+
                         add_history(
                             "AUTO SL",
                             symbol,
@@ -1660,30 +1647,29 @@ async def autotrade_loop(chat_id):
                         )
 
                         await bot.send_message(
-
                             chat_id,
-
                             f"🛑 STOP LOSS\n\n"
-
                             f"{symbol}\n"
-
-                            f"PnL: "
-                            f"{pnl_percent:.2f}%"
+                            f"PnL: {pnl_percent:.2f}%"
                         )
 
+                        sell_signal_locks.discard(symbol)
                         continue
 
-                    # =========================
-                    # SELL SIGNAL
-                    # =========================
-
-                    decision = (
-                        multi_timeframe_decision_for_symbol(
-                            symbol
-                        )
-                    )
+                    decision = multi_timeframe_decision_for_symbol(symbol)
 
                     if decision["signal"] == "SELL":
+                        if symbol in sell_signal_locks:
+                            continue
+
+                        real_balance = get_okx_asset_balance(symbol)
+
+                        if real_balance <= 0:
+                            delete_open_position(symbol)
+                            sell_signal_locks.discard(symbol)
+                            continue
+
+                        sell_signal_locks.add(symbol)
 
                         place_market_sell(
                             symbol,
@@ -1697,6 +1683,8 @@ async def autotrade_loop(chat_id):
                             "SELL SIGNAL"
                         )
 
+                        sync_positions_with_okx()
+
                         add_history(
                             "AUTO SELL",
                             symbol,
@@ -1705,64 +1693,41 @@ async def autotrade_loop(chat_id):
                         )
 
                         await bot.send_message(
-
                             chat_id,
-
                             f"🔴 SELL SIGNAL\n\n"
-
                             f"{symbol}\n"
-
-                            f"PnL: "
-                            f"{pnl_percent:.2f}%"
+                            f"PnL: {pnl_percent:.2f}%"
                         )
 
-                except Exception:
-                    pass
+                        sell_signal_locks.discard(symbol)
 
-            # =========================
-            # ПОИСК НОВОЙ СДЕЛКИ
-            # =========================
+                except Exception as e:
+                    await bot.send_message(
+                        chat_id,
+                        f"⚠️ Ошибка позиции {symbol}\n\n{e}"
+                    )
+
+            sync_positions_with_okx()
 
             positions = get_open_positions()
 
-            if (
-                len(positions)
-                < risk_settings["max_open_positions"]
-            ):
-
+            if len(positions) < risk_settings["max_open_positions"]:
                 if auto_select_symbol:
-
-                    symbol, best_data = (
-                        choose_best_symbol()
-                    )
-
+                    symbol, best_data = choose_best_symbol()
                 else:
-
                     symbol = current_trade_symbol
 
                 current_trade_symbol = symbol
 
-                decision = (
-                    multi_timeframe_decision_for_symbol(
-                        symbol
-                    )
-                )
+                decision = multi_timeframe_decision_for_symbol(symbol)
 
                 if decision["signal"] == "BUY":
-
-                    allowed, reason = (
-                        can_open_new_position(
-                            symbol
-                        )
-                    )
+                    allowed, reason = can_open_new_position(symbol)
 
                     if allowed:
+                        amount = get_trade_amount_usdt()
 
-                        amount = (
-                            get_trade_amount_usdt()
-                        )
-
-                        place_market_buy(
+                        result = place_market_buy(
                             symbol,
                             amount
                         )
@@ -1773,45 +1738,34 @@ async def autotrade_loop(chat_id):
                             amount
                         )
 
+                        sync_positions_with_okx()
+
                         add_history(
                             "AUTO BUY",
                             symbol,
                             decision["price"],
-                            decision["avg_score"]
+                            decision["avg_score"],
+                            result
                         )
 
                         await bot.send_message(
-
                             chat_id,
-
                             f"🟢 AUTO BUY\n\n"
-
                             f"{symbol}\n"
-
-                            f"Цена: "
-                            f"{decision['price']:.4f}\n"
-
-                            f"Сила сигнала: "
-                            f"{decision['avg_score']}%\n"
-
-                            f"Сумма: "
-                            f"{amount} USDT"
+                            f"Цена: {decision['price']:.4f}\n"
+                            f"Сила сигнала: {decision['avg_score']}%\n"
+                            f"Сумма: {amount} USDT"
                         )
 
             save_runtime_settings()
 
         except Exception as e:
-
             await bot.send_message(
-
                 chat_id,
-
                 f"❌ Ошибка автоторговли\n\n{e}"
             )
 
-        await asyncio.sleep(
-            AUTO_INTERVAL
-        )
+        await asyncio.sleep(AUTO_INTERVAL)
 
 
 # =========================
