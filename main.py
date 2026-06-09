@@ -25,7 +25,7 @@ OKX_API_KEY = os.getenv("OKX_API_KEY")
 OKX_SECRET_KEY = os.getenv("OKX_SECRET_KEY")
 OKX_PASSPHRASE = os.getenv("OKX_PASSPHRASE")
 
-OKX_FLAG = os.getenv("OKX_FLAG", "1")
+OKX_FLAG = os.getenv("OKX_FLAG", "0")
 LIVE_TRADING_ENABLED = os.getenv("LIVE_TRADING_ENABLED", "NO")
 
 TRADE_SYMBOL = os.getenv("TRADE_SYMBOL", "BTC-USDT")
@@ -103,7 +103,7 @@ current_trade_symbol = TRADE_SYMBOL
 
 risk_settings = {
     "amount_usdt": TRADE_AMOUNT_USDT,
-    "max_amount_usdt": 20.0,
+    "max_amount_usdt": 25.0,
     "stop_loss_percent": 2.0,
     "take_profit_percent": 4.0,
     "trailing_stop_percent": 1.5,
@@ -129,13 +129,13 @@ keyboard = ReplyKeyboardMarkup(
         [KeyboardButton(text="📡 Сигнал"), KeyboardButton(text="🌐 Рынок")],
         [KeyboardButton(text="🔎 Сканер"), KeyboardButton(text="🏆 Лучшая")],
         [KeyboardButton(text="🥇 Топ-3"), KeyboardButton(text="📋 Позиции")],
-        [KeyboardButton(text="🟢 Купить DEMO"), KeyboardButton(text="🔴 Продать DEMO")],
         [KeyboardButton(text="🟢 Купить LIVE"), KeyboardButton(text="🔴 Продать LIVE")],
         [KeyboardButton(text="🟢 Авто ВКЛ"), KeyboardButton(text="🔴 Авто ВЫКЛ")],
         [KeyboardButton(text="🧠 Авто монета"), KeyboardButton(text="💱 Текущая монета")],
         [KeyboardButton(text="🤖 Авто статус"), KeyboardButton(text="🛡 Риск")],
         [KeyboardButton(text="📜 История"), KeyboardButton(text="📈 Статистика")],
-        [KeyboardButton(text="💹 PnL"), KeyboardButton(text="♻️ Сброс позиций")],
+        [KeyboardButton(text="💹 PnL"), KeyboardButton(text="📅 Дневной отчет")],
+        [KeyboardButton(text="🔄 Синхронизация OKX"), KeyboardButton(text="♻️ Сброс позиций")],
     ],
     resize_keyboard=True,
 )
@@ -166,61 +166,6 @@ def safe_float(value, default=0.0):
         return float(value)
     except Exception:
         return default
-def get_trading_usdt_balance():
-    try:
-        result = account_api.get_account_balance()
-        details = result.get("data", [{}])[0].get("details", [])
-
-        for item in details:
-            if item.get("ccy") == "USDT":
-                return safe_float(
-                    item.get("availBal")
-                    or item.get("cashBal")
-                )
-
-        return 0.0
-
-    except Exception:
-        return 0.0
-
-
-def get_trade_amount_usdt():
-
-    if not risk_settings.get(
-        "auto_amount_enabled",
-        True
-    ):
-        return min(
-            risk_settings["amount_usdt"],
-            risk_settings["max_amount_usdt"]
-        )
-
-    balance = get_trading_usdt_balance()
-
-    calculated = (
-        balance
-        * risk_settings["balance_usage_percent"]
-        / 100
-    )
-
-    calculated = max(
-        calculated,
-        risk_settings["min_trade_usdt"]
-    )
-
-    calculated = min(
-        calculated,
-        risk_settings["max_trade_usdt"]
-    )
-
-    calculated = min(
-        calculated,
-        risk_settings["max_amount_usdt"]
-    )
-
-    return round(calculated, 2)
-
-
 # =========================
 # DATABASE
 # =========================
@@ -283,8 +228,6 @@ def init_db():
             stop_loss_price REAL,
             take_profit_price REAL,
             highest_price REAL,
-            partial_1_done INTEGER,
-            partial_2_done INTEGER,
             time TEXT
         )
         """
@@ -405,36 +348,142 @@ def add_closed_trade(symbol, entry_price, exit_price, amount_usdt, reason):
 
     conn.commit()
     conn.close()
+
+
+def get_history(limit=10):
+    conn = db_connect()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT time, action, symbol, price, score
+        FROM history
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+def get_closed_trades(limit=1000):
+    conn = db_connect()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT time, symbol, entry_price, exit_price, amount_usdt, pnl_percent, pnl_usdt, reason
+        FROM closed_trades
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+
+def trades_today_count():
+    conn = db_connect()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT COUNT(*)
+        FROM history
+        WHERE date = ? AND action LIKE '%AUTO%'
+        """,
+        (today_str(),),
+    )
+
+    count = cur.fetchone()[0]
+    conn.close()
+    return int(count)
+
+
+def pnl_today_usdt():
+    conn = db_connect()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT COALESCE(SUM(pnl_usdt), 0)
+        FROM closed_trades
+        WHERE date = ?
+        """,
+        (today_str(),),
+    )
+
+    value = cur.fetchone()[0]
+    conn.close()
+    return safe_float(value)
+
+
+def total_pnl_usdt():
+    conn = db_connect()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT COALESCE(SUM(pnl_usdt), 0)
+        FROM closed_trades
+        """
+    )
+
+    value = cur.fetchone()[0]
+    conn.close()
+    return safe_float(value)
+
+
+def total_pnl_percent():
+    conn = db_connect()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT COALESCE(SUM(pnl_percent), 0)
+        FROM closed_trades
+        """
+    )
+
+    value = cur.fetchone()[0]
+    conn.close()
+    return safe_float(value)
+
+
+def winrate():
+    trades = get_closed_trades(1000)
+
+    if not trades:
+        return 0.0
+
+    wins = 0
+
+    for trade in trades:
+        pnl_usdt = safe_float(trade[6])
+        if pnl_usdt > 0:
+            wins += 1
+
+    return wins / len(trades) * 100
+
 # =========================
-# DATABASE POSITIONS / STATS
+# POSITIONS DATABASE
 # =========================
 
-def save_open_position(
-    symbol,
-    entry_price,
-    amount_usdt,
-    stop_loss_price,
-    take_profit_price,
-    highest_price
-):
+def save_open_position(symbol, entry_price, amount_usdt, stop_loss_price, take_profit_price, highest_price):
     conn = db_connect()
     cur = conn.cursor()
 
     cur.execute(
         """
         INSERT OR REPLACE INTO open_positions
-        (
-            symbol,
-            entry_price,
-            amount_usdt,
-            stop_loss_price,
-            take_profit_price,
-            highest_price,
-            partial_1_done,
-            partial_2_done,
-            time
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (symbol, entry_price, amount_usdt, stop_loss_price, take_profit_price, highest_price, time)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         (
             symbol,
@@ -443,8 +492,6 @@ def save_open_position(
             stop_loss_price,
             take_profit_price,
             highest_price,
-            0,
-            0,
             now(),
         ),
     )
@@ -460,14 +507,8 @@ def update_open_position(symbol, position):
     cur.execute(
         """
         UPDATE open_positions
-        SET
-            entry_price = ?,
-            amount_usdt = ?,
-            stop_loss_price = ?,
-            take_profit_price = ?,
-            highest_price = ?,
-            partial_1_done = ?,
-            partial_2_done = ?
+        SET entry_price = ?, amount_usdt = ?, stop_loss_price = ?,
+            take_profit_price = ?, highest_price = ?
         WHERE symbol = ?
         """,
         (
@@ -476,8 +517,6 @@ def update_open_position(symbol, position):
             position["stop_loss_price"],
             position["take_profit_price"],
             position["highest_price"],
-            position["partial_1_done"],
-            position["partial_2_done"],
             symbol,
         ),
     )
@@ -505,16 +544,8 @@ def get_open_positions():
 
     cur.execute(
         """
-        SELECT
-            symbol,
-            entry_price,
-            amount_usdt,
-            stop_loss_price,
-            take_profit_price,
-            highest_price,
-            partial_1_done,
-            partial_2_done,
-            time
+        SELECT symbol, entry_price, amount_usdt, stop_loss_price,
+               take_profit_price, highest_price, time
         FROM open_positions
         """
     )
@@ -532,9 +563,7 @@ def get_open_positions():
             "stop_loss_price": safe_float(row[3]),
             "take_profit_price": safe_float(row[4]),
             "highest_price": safe_float(row[5]),
-            "partial_1_done": int(row[6]),
-            "partial_2_done": int(row[7]),
-            "time": row[8],
+            "time": row[6],
         }
 
     return positions
@@ -550,172 +579,129 @@ def clear_open_positions():
     conn.close()
 
 
-def get_history(limit=10):
-    conn = db_connect()
-    cur = conn.cursor()
+# =========================
+# OKX BALANCE / SYNC
+# =========================
 
-    cur.execute(
-        """
-        SELECT time, action, symbol, price, score
-        FROM history
-        ORDER BY id DESC
-        LIMIT ?
-        """,
-        (limit,),
-    )
-
-    rows = cur.fetchall()
-    conn.close()
-
-    return rows
+def get_account_details():
+    result = account_api.get_account_balance()
+    return result.get("data", [{}])[0].get("details", [])
 
 
-def get_closed_trades(limit=300):
-    conn = db_connect()
-    cur = conn.cursor()
+def get_trading_usdt_balance():
+    try:
+        details = get_account_details()
 
-    cur.execute(
-        """
-        SELECT
-            time,
-            symbol,
-            entry_price,
-            exit_price,
-            amount_usdt,
-            pnl_percent,
-            pnl_usdt,
-            reason
-        FROM closed_trades
-        ORDER BY id DESC
-        LIMIT ?
-        """,
-        (limit,),
-    )
+        for item in details:
+            if item.get("ccy") == "USDT":
+                return safe_float(item.get("availBal") or item.get("cashBal"))
 
-    rows = cur.fetchall()
-    conn.close()
-
-    return rows
-
-
-def trades_today_count():
-    conn = db_connect()
-    cur = conn.cursor()
-
-    cur.execute(
-        """
-        SELECT COUNT(*)
-        FROM history
-        WHERE date = ? AND action LIKE '%AUTO%'
-        """,
-        (today_str(),),
-    )
-
-    count = cur.fetchone()[0]
-    conn.close()
-
-    return int(count)
-
-
-def pnl_today_percent():
-    conn = db_connect()
-    cur = conn.cursor()
-
-    cur.execute(
-        """
-        SELECT COALESCE(SUM(pnl_percent), 0)
-        FROM closed_trades
-        WHERE date = ?
-        """,
-        (today_str(),),
-    )
-
-    value = cur.fetchone()[0]
-    conn.close()
-
-    return safe_float(value)
-
-
-def total_pnl_percent():
-    conn = db_connect()
-    cur = conn.cursor()
-
-    cur.execute(
-        """
-        SELECT COALESCE(SUM(pnl_percent), 0)
-        FROM closed_trades
-        """
-    )
-
-    value = cur.fetchone()[0]
-    conn.close()
-
-    return safe_float(value)
-
-
-def total_pnl_usdt():
-    conn = db_connect()
-    cur = conn.cursor()
-
-    cur.execute(
-        """
-        SELECT COALESCE(SUM(pnl_usdt), 0)
-        FROM closed_trades
-        """
-    )
-
-    value = cur.fetchone()[0]
-    conn.close()
-
-    return safe_float(value)
-
-
-def winrate():
-    trades = get_closed_trades(1000)
-
-    if not trades:
         return 0.0
 
-    wins = 0
-
-    for trade in trades:
-        pnl_usdt = safe_float(trade[6])
-        if pnl_usdt > 0:
-            wins += 1
-
-    return wins / len(trades) * 100
+    except Exception:
+        return 0.0
 
 
-def can_trade_today():
-    if trades_today_count() >= risk_settings["max_trades_day"]:
-        return False, "Достигнут дневной лимит сделок"
+def get_trade_amount_usdt():
+    if not risk_settings.get("auto_amount_enabled", True):
+        return min(
+            risk_settings["amount_usdt"],
+            risk_settings["max_amount_usdt"]
+        )
 
-    if pnl_today_percent() <= -abs(risk_settings["max_daily_loss_percent"]):
-        return False, "Достигнут дневной лимит убытка"
+    balance = get_trading_usdt_balance()
 
-    return True, "OK"
+    calculated = balance * risk_settings["balance_usage_percent"] / 100
+
+    calculated = max(calculated, risk_settings["min_trade_usdt"])
+    calculated = min(calculated, risk_settings["max_trade_usdt"])
+    calculated = min(calculated, risk_settings["max_amount_usdt"])
+
+    return round(calculated, 2)
 
 
-def can_open_new_position(symbol):
-    positions = get_open_positions()
+def symbol_to_currency(symbol):
+    return symbol.split("-")[0]
 
-    if symbol in positions:
-        return False, "По этой монете уже есть открытая позиция"
 
-    if len(positions) >= risk_settings["max_open_positions"]:
-        return False, "Достигнут лимит открытых позиций"
+def currency_to_symbol(currency):
+    return f"{currency}-USDT"
 
-    allowed, reason = can_trade_today()
 
-    if not allowed:
-        return False, reason
+def get_okx_real_spot_assets():
+    assets = {}
 
-    return True, "OK"
-# =========================
+    try:
+        details = get_account_details()
+
+        for item in details:
+            ccy = item.get("ccy")
+            balance = safe_float(item.get("cashBal"))
+            available = safe_float(item.get("availBal"))
+
+            if not ccy or ccy == "USDT":
+                continue
+
+            if balance <= 0 and available <= 0:
+                continue
+
+            symbol = currency_to_symbol(ccy)
+
+            if symbol not in WATCHLIST:
+                continue
+
+            assets[symbol] = {
+                "currency": ccy,
+                "balance": balance,
+                "available": available,
+            }
+
+        return assets
+
+    except Exception:
+        return assets
+
+
+def sync_positions_with_okx():
+    real_assets = get_okx_real_spot_assets()
+    saved_positions = get_open_positions()
+
+    for symbol in list(saved_positions.keys()):
+        if symbol not in real_assets:
+            delete_open_position(symbol)
+
+    for symbol, asset in real_assets.items():
+        if symbol not in saved_positions:
+            try:
+                signal = build_signal(symbol, "15m")
+                entry_price = signal["price"]
+                amount_usdt = asset["balance"] * entry_price
+
+                stop_loss_price = entry_price * (
+                    1 - risk_settings["stop_loss_percent"] / 100
+                )
+
+                take_profit_price = entry_price * (
+                    1 + risk_settings["take_profit_percent"] / 100
+                )
+
+                save_open_position(
+                    symbol,
+                    entry_price,
+                    amount_usdt,
+                    stop_loss_price,
+                    take_profit_price,
+                    entry_price,
+                )
+
+            except Exception:
+                continue
+      # =========================
 # INDICATORS
 # =========================
 
 def calculate_rsi(series, period=14):
+
     delta = series.diff()
 
     gain = delta.where(delta > 0, 0.0)
@@ -725,50 +711,110 @@ def calculate_rsi(series, period=14):
     avg_loss = loss.rolling(period).mean()
 
     rs = avg_gain / avg_loss.replace(0, 1e-9)
+
     rsi = 100 - (100 / (1 + rs))
 
     return rsi.fillna(50)
 
 
 def add_indicators(df):
-    df["ema9"] = df["close"].ewm(span=9, adjust=False).mean()
-    df["ema21"] = df["close"].ewm(span=21, adjust=False).mean()
-    df["ema50"] = df["close"].ewm(span=50, adjust=False).mean()
-    df["ema200"] = df["close"].ewm(span=200, adjust=False).mean()
+
+    df["ema9"] = df["close"].ewm(
+        span=9,
+        adjust=False
+    ).mean()
+
+    df["ema21"] = df["close"].ewm(
+        span=21,
+        adjust=False
+    ).mean()
+
+    df["ema50"] = df["close"].ewm(
+        span=50,
+        adjust=False
+    ).mean()
+
+    df["ema200"] = df["close"].ewm(
+        span=200,
+        adjust=False
+    ).mean()
 
     df["rsi"] = calculate_rsi(df["close"])
 
-    ema12 = df["close"].ewm(span=12, adjust=False).mean()
-    ema26 = df["close"].ewm(span=26, adjust=False).mean()
+    ema12 = df["close"].ewm(
+        span=12,
+        adjust=False
+    ).mean()
+
+    ema26 = df["close"].ewm(
+        span=26,
+        adjust=False
+    ).mean()
 
     df["macd"] = ema12 - ema26
-    df["macd_signal"] = df["macd"].ewm(span=9, adjust=False).mean()
+
+    df["macd_signal"] = df["macd"].ewm(
+        span=9,
+        adjust=False
+    ).mean()
 
     df["bb_mid"] = df["close"].rolling(20).mean()
-    df["bb_std"] = df["close"].rolling(20).std()
-    df["bb_upper"] = df["bb_mid"] + 2 * df["bb_std"]
-    df["bb_lower"] = df["bb_mid"] - 2 * df["bb_std"]
 
-    df["vol_avg"] = df["vol"].rolling(20).mean()
+    df["bb_std"] = df["close"].rolling(20).std()
+
+    df["bb_upper"] = (
+        df["bb_mid"]
+        + 2 * df["bb_std"]
+    )
+
+    df["bb_lower"] = (
+        df["bb_mid"]
+        - 2 * df["bb_std"]
+    )
+
+    df["vol_avg"] = (
+        df["vol"]
+        .rolling(20)
+        .mean()
+    )
 
     high_low = df["high"] - df["low"]
-    high_close = (df["high"] - df["close"].shift()).abs()
-    low_close = (df["low"] - df["close"].shift()).abs()
+
+    high_close = (
+        df["high"]
+        - df["close"].shift()
+    ).abs()
+
+    low_close = (
+        df["low"]
+        - df["close"].shift()
+    ).abs()
 
     true_range = pd.concat(
-        [high_low, high_close, low_close],
+        [
+            high_low,
+            high_close,
+            low_close
+        ],
         axis=1
     ).max(axis=1)
 
-    df["atr"] = true_range.rolling(14).mean().fillna(0)
+    df["atr"] = (
+        true_range
+        .rolling(14)
+        .mean()
+        .fillna(0)
+    )
 
     return df
 
 
 # =========================
-# MARKET DATA / SIGNALS
+# PRO SCORING V2
 # =========================
+
 def calculate_score(data):
+
     score = 50
 
     close = data["close"]
@@ -776,15 +822,21 @@ def calculate_score(data):
     ema21 = data["ema21"]
     ema50 = data["ema50"]
     ema200 = data["ema200"]
+
     rsi = data["rsi"]
+
     macd = data["macd"]
     macd_signal = data["macd_signal"]
+
     vol = data["vol"]
     vol_avg = data["vol_avg"]
+
     bb_upper = data["bb_upper"]
     bb_lower = data["bb_lower"]
-    atr = data.get("atr", 0)
 
+    atr = data["atr"]
+
+    # EMA
     if ema9 > ema21:
         score += 12
     else:
@@ -800,6 +852,7 @@ def calculate_score(data):
     else:
         score -= 15
 
+    # PRICE
     if close > ema9:
         score += 5
     else:
@@ -810,6 +863,7 @@ def calculate_score(data):
     else:
         score -= 7
 
+    # MACD
     if macd > macd_signal:
         score += 12
     else:
@@ -820,70 +874,97 @@ def calculate_score(data):
     else:
         score -= 5
 
+    # RSI
     if rsi < 25:
         score += 8
+
     elif 25 <= rsi < 35:
         score += 12
+
     elif 35 <= rsi <= 60:
         score += 8
+
     elif 60 < rsi <= 70:
         score += 2
+
     elif rsi > 75:
         score -= 18
+
     else:
         score -= 5
 
+    # VOLUME
     if vol_avg > 0:
+
         volume_ratio = vol / vol_avg
 
         if volume_ratio >= 1.8:
             score += 10
+
         elif volume_ratio >= 1.2:
             score += 6
+
         elif volume_ratio < 0.7:
             score -= 8
 
+    # BOLLINGER
     if bb_lower > 0 and close <= bb_lower:
         score += 8
 
     if bb_upper > 0 and close >= bb_upper:
         score -= 10
 
+    # ATR
     if atr > 0 and close > 0:
-        atr_percent = atr / close * 100
+
+        atr_percent = (
+            atr / close
+        ) * 100
 
         if 0.2 <= atr_percent <= 3.5:
             score += 5
+
         elif atr_percent < 0.1:
             score -= 8
+
         elif atr_percent > 6:
             score -= 10
 
-    score = max(0, min(100, int(score)))
+    score = max(
+        0,
+        min(100, int(score))
+    )
 
     if score >= risk_settings["buy_score"]:
         signal = "BUY"
+
     elif score <= risk_settings["sell_score"]:
         signal = "SELL"
+
     else:
         signal = "HOLD"
 
     return score, signal
-
+ # =========================
+# MARKET DATA
+# =========================
 
 def get_market_data(symbol=None, bar="15m", limit=250):
-    symbol = symbol or TRADE_SYMBOL
+
+    symbol = symbol or current_trade_symbol
 
     result = market_api.get_candlesticks(
         instId=symbol,
         bar=bar,
-        limit=str(limit),
+        limit=str(limit)
     )
 
     candles = result.get("data", [])
 
     if not candles:
-        raise Exception(f"OKX не вернул свечи для {symbol}")
+        raise Exception(
+            f"Нет свечей для {symbol}"
+        )
 
     df = pd.DataFrame(
         candles,
@@ -896,23 +977,39 @@ def get_market_data(symbol=None, bar="15m", limit=250):
             "vol",
             "volCcy",
             "volCcyQuote",
-            "confirm",
-        ],
+            "confirm"
+        ]
     )
 
-    for col in ["open", "high", "low", "close", "vol"]:
+    for col in [
+        "open",
+        "high",
+        "low",
+        "close",
+        "vol"
+    ]:
         df[col] = df[col].astype(float)
 
     df = df.iloc[::-1].reset_index(drop=True)
+
     df = add_indicators(df)
 
     return df
 
 
-def build_signal(symbol=None, bar="15m"):
-    symbol = symbol or TRADE_SYMBOL
+# =========================
+# BUILD SIGNAL
+# =========================
 
-    df = get_market_data(symbol, bar)
+def build_signal(symbol=None, bar="15m"):
+
+    symbol = symbol or current_trade_symbol
+
+    df = get_market_data(
+        symbol,
+        bar
+    )
+
     last = df.iloc[-1]
 
     data = {
@@ -925,72 +1022,30 @@ def build_signal(symbol=None, bar="15m"):
         "rsi": safe_float(last["rsi"]),
         "macd": safe_float(last["macd"]),
         "macd_signal": safe_float(last["macd_signal"]),
-        "bb_upper": safe_float(last.get("bb_upper", 0)),
-        "bb_lower": safe_float(last.get("bb_lower", 0)),
-        "vol_avg": safe_float(last.get("vol_avg", 0)),
-        "atr": safe_float(last.get("atr", 0)),
+        "bb_upper": safe_float(last["bb_upper"]),
+        "bb_lower": safe_float(last["bb_lower"]),
+        "vol_avg": safe_float(last["vol_avg"]),
+        "atr": safe_float(last["atr"]),
     }
 
-    score, signal = calculate_score(data)
+    score, signal = calculate_score(
+        data
+    )
 
-    if data["ema9"] > data["ema21"] and data["ema50"] > data["ema200"]:
-        trend = "сильный восходящий"
-    elif data["ema9"] > data["ema21"]:
-        trend = "восходящий"
-    elif data["ema9"] < data["ema21"] and data["ema50"] < data["ema200"]:
-        trend = "сильный нисходящий"
+    if data["ema50"] > data["ema200"]:
+        trend = "Восходящий 📈"
     else:
-        trend = "нисходящий"
+        trend = "Нисходящий 📉"
 
     return {
         "symbol": symbol,
         "bar": bar,
         "price": data["close"],
-        "rsi": data["rsi"],
-        "ema9": data["ema9"],
-        "ema21": data["ema21"],
-        "ema50": data["ema50"],
-        "ema200": data["ema200"],
-        "macd": data["macd"],
-        "macd_signal": data["macd_signal"],
-        "atr": data["atr"],
         "score": score,
         "signal": signal,
         "trend": trend,
+        **data
     }
-# =========================
-# FORMAT SIGNAL
-# =========================
-
-def format_signal(result):
-
-    return (
-        f"📡 {result['symbol']} | {result['bar']}\n\n"
-
-        f"Цена: {result['price']:.4f}\n"
-
-        f"Тренд: {result['trend']}\n"
-
-        f"RSI: {result['rsi']:.2f}\n"
-
-        f"EMA9: {result['ema9']:.4f}\n"
-
-        f"EMA21: {result['ema21']:.4f}\n"
-
-        f"EMA50: {result['ema50']:.4f}\n"
-
-        f"EMA200: {result['ema200']:.4f}\n"
-
-        f"MACD: {result['macd']:.4f}\n"
-
-        f"MACD Signal: {result['macd_signal']:.4f}\n"
-
-        f"ATR: {result['atr']:.4f}\n\n"
-
-        f"Сила сигнала: {result['score']}%\n"
-
-        f"Решение: {result['signal']}"
-    )
 
 
 # =========================
@@ -1001,56 +1056,65 @@ def multi_timeframe_decision_for_symbol(symbol):
 
     results = []
 
-    for timeframe in TIMEFRAMES:
+    for tf in TIMEFRAMES:
 
         signal = build_signal(
             symbol,
-            timeframe
+            tf
         )
 
         results.append(signal)
 
-    buy_count = sum(
-        1 for item in results
-        if item["signal"] == "BUY"
-    )
-
-    sell_count = sum(
-        1 for item in results
-        if item["signal"] == "SELL"
-    )
-
     avg_score = int(
-        sum(item["score"] for item in results)
+        sum(
+            x["score"]
+            for x in results
+        )
         / len(results)
+    )
+
+    buy_count = len(
+        [
+            x
+            for x in results
+            if x["signal"] == "BUY"
+        ]
+    )
+
+    sell_count = len(
+        [
+            x
+            for x in results
+            if x["signal"] == "SELL"
+        ]
     )
 
     if (
         buy_count >= 2
         and avg_score >= risk_settings["buy_score"]
     ):
-        final_signal = "BUY"
+        signal = "BUY"
 
     elif (
         sell_count >= 2
         and avg_score <= risk_settings["sell_score"]
     ):
-        final_signal = "SELL"
+        signal = "SELL"
 
     else:
-        final_signal = "HOLD"
+        signal = "HOLD"
 
     return {
         "symbol": symbol,
-        "signal": final_signal,
+        "signal": signal,
         "avg_score": avg_score,
         "price": results[1]["price"],
-        "results": results,
+        "results": results
     }
 
 
 # =========================
-# MARKET SCANNER
+# SCANNER
 # =========================
 
 def scan_market():
@@ -1061,12 +1125,19 @@ def scan_market():
 
         try:
 
-            signal = build_signal(
-                symbol,
-                "15m"
+            decision = (
+                multi_timeframe_decision_for_symbol(
+                    symbol
+                )
             )
 
-            results.append(signal)
+            results.append(
+                {
+                    "symbol": symbol,
+                    "signal": decision["signal"],
+                    "score": decision["avg_score"]
+                }
+            )
 
         except Exception:
             pass
@@ -1100,8 +1171,10 @@ def choose_best_symbol():
     results = scan_market()
 
     if not results:
-
-        return TRADE_SYMBOL, None
+        return (
+            current_trade_symbol,
+            None
+        )
 
     best = results[0]
 
@@ -1112,7 +1185,74 @@ def choose_best_symbol():
 
 
 # =========================
-# POSITION HELPERS
+# FORMAT SIGNAL
+# =========================
+
+def format_signal(signal):
+
+    return (
+
+        f"📡 {signal['symbol']}\n\n"
+
+        f"Цена: "
+        f"{signal['price']:.4f}\n"
+
+        f"Тренд: "
+        f"{signal['trend']}\n"
+
+        f"RSI: "
+        f"{signal['rsi']:.2f}\n"
+
+        f"MACD: "
+        f"{signal['macd']:.4f}\n\n"
+
+        f"Сила сигнала: "
+        f"{signal['score']}%\n"
+
+        f"Решение: "
+        f"{signal['signal']}"
+    )
+# =========================
+# OKX ORDERS
+# =========================
+
+def place_market_buy(symbol, amount_usdt):
+
+    if not is_live_allowed():
+        raise Exception(
+            "LIVE торговля запрещена"
+        )
+
+    return trade_api.place_order(
+        instId=symbol,
+        tdMode="cash",
+        side="buy",
+        ordType="market",
+        sz=str(amount_usdt),
+        tgtCcy="quote_ccy"
+    )
+
+
+def place_market_sell(symbol, amount_usdt, price):
+
+    if not is_live_allowed():
+        raise Exception(
+            "LIVE торговля запрещена"
+        )
+
+    base_amount = amount_usdt / price
+
+    return trade_api.place_order(
+        instId=symbol,
+        tdMode="cash",
+        side="sell",
+        ordType="market",
+        sz=str(round(base_amount, 8))
+    )
+
+
+# =========================
+# OPEN POSITION
 # =========================
 
 def open_position(
@@ -1121,17 +1261,23 @@ def open_position(
     amount_usdt
 ):
 
-    stop_loss_price = entry_price * (
-        1 -
-        risk_settings["stop_loss_percent"] / 100
+    stop_loss_price = (
+        entry_price
+        * (
+            1
+            - risk_settings["stop_loss_percent"]
+            / 100
+        )
     )
 
-    take_profit_price = entry_price * (
-        1 +
-        risk_settings["take_profit_percent"] / 100
+    take_profit_price = (
+        entry_price
+        * (
+            1
+            + risk_settings["take_profit_percent"]
+            / 100
+        )
     )
-
-    highest_price = entry_price
 
     save_open_position(
         symbol,
@@ -1139,9 +1285,13 @@ def open_position(
         amount_usdt,
         stop_loss_price,
         take_profit_price,
-        highest_price
+        entry_price
     )
 
+
+# =========================
+# CLOSE POSITION
+# =========================
 
 def close_position(
     symbol,
@@ -1164,7 +1314,9 @@ def close_position(
         reason
     )
 
-    delete_open_position(symbol)
+    delete_open_position(
+        symbol
+    )
 
 
 # =========================
@@ -1187,159 +1339,85 @@ def update_trailing_stop(
 
         position["highest_price"] = current_price
 
-        new_stop = current_price * (
-            1 -
-            risk_settings["trailing_stop_percent"]
-            / 100
+        new_stop = (
+            current_price
+            * (
+                1
+                - risk_settings["trailing_stop_percent"]
+                / 100
+            )
         )
 
         if new_stop > position["stop_loss_price"]:
-
             position["stop_loss_price"] = new_stop
 
         update_open_position(
             symbol,
             position
         )
+
+
 # =========================
-# OKX ORDERS
+# CAN TRADE
 # =========================
 
-def place_market_buy(symbol, amount_usdt):
+def can_trade_today():
 
-    if not is_demo() and not is_live_allowed():
-        raise Exception(
-            "LIVE торговля запрещена.\n"
-            "Установите LIVE_TRADING_ENABLED=YES"
+    if (
+        trades_today_count()
+        >= risk_settings["max_trades_day"]
+    ):
+
+        return (
+            False,
+            "Достигнут лимит сделок"
         )
 
-    return trade_api.place_order(
-        instId=symbol,
-        tdMode="cash",
-        side="buy",
-        ordType="market",
-        sz=str(amount_usdt),
-        tgtCcy="quote_ccy"
+    return (
+        True,
+        "OK"
     )
 
 
-def place_market_sell(symbol, amount_usdt, price):
-
-    if not is_demo() and not is_live_allowed():
-        raise Exception(
-            "LIVE торговля запрещена.\n"
-            "Установите LIVE_TRADING_ENABLED=YES"
-        )
-
-    base_amount = amount_usdt / price
-
-    return trade_api.place_order(
-        instId=symbol,
-        tdMode="cash",
-        side="sell",
-        ordType="market",
-        sz=str(round(base_amount, 8))
-    )
-
-
-# =========================
-# DEMO BUY
-# =========================
-
-async def do_demo_buy(message):
-
-    symbol = current_trade_symbol
-
-    allowed, reason = can_open_new_position(symbol)
-
-    if not allowed:
-        await message.answer(f"⛔ {reason}")
-        return
-
-    signal_data = build_signal(symbol)
-
-    amount = get_trade_amount_usdt()
-
-    open_position(
-        symbol,
-        signal_data["price"],
-        amount
-    )
-
-    add_history(
-        "MANUAL DEMO BUY",
-        symbol,
-        signal_data["price"],
-        signal_data["score"]
-    )
-
-    await message.answer(
-        f"🟢 DEMO BUY\n\n"
-        f"Монета: {symbol}\n"
-        f"Цена: {signal_data['price']:.4f}\n"
-        f"Сила сигнала: {signal_data['score']}%"
-    )
-
-
-# =========================
-# DEMO SELL
-# =========================
-
-async def do_demo_sell(message):
+def can_open_new_position(
+    symbol
+):
 
     positions = get_open_positions()
 
-    if not positions:
+    if symbol in positions:
 
-        await message.answer(
-            "📋 Открытых позиций нет."
+        return (
+            False,
+            "Позиция уже существует"
         )
 
-        return
+    if (
+        len(positions)
+        >= risk_settings["max_open_positions"]
+    ):
 
-    symbol = list(positions.keys())[0]
+        return (
+            False,
+            "Достигнут лимит позиций"
+        )
 
-    signal_data = build_signal(symbol)
-
-    close_position(
-        symbol,
-        signal_data["price"],
-        "MANUAL DEMO SELL"
-    )
-
-    add_history(
-        "MANUAL DEMO SELL",
-        symbol,
-        signal_data["price"],
-        signal_data["score"]
-    )
-
-    await message.answer(
-        f"🔴 DEMO SELL\n\n"
-        f"{symbol}\n"
-        f"Цена: {signal_data['price']:.4f}"
-    )
+    return can_trade_today()
 
 
 # =========================
-# LIVE BUY
+# MANUAL BUY LIVE
 # =========================
 
 async def do_live_buy(message):
 
-    if not is_live_allowed():
-
-        await message.answer(
-            "⛔ LIVE торговля запрещена.\n\n"
-            "Установите:\n"
-            "LIVE_TRADING_ENABLED=YES"
-        )
-
-        return
-
     symbol = current_trade_symbol
 
-    allowed, reason = can_open_new_position(symbol)
+    allowed, reason = (
+        can_open_new_position(
+            symbol
+        )
+    )
 
     if not allowed:
 
@@ -1349,7 +1427,9 @@ async def do_live_buy(message):
 
         return
 
-    signal_data = build_signal(symbol)
+    signal = build_signal(
+        symbol
+    )
 
     amount = get_trade_amount_usdt()
 
@@ -1360,230 +1440,332 @@ async def do_live_buy(message):
 
     open_position(
         symbol,
-        signal_data["price"],
+        signal["price"],
         amount
     )
 
     add_history(
         "MANUAL LIVE BUY",
         symbol,
-        signal_data["price"],
-        signal_data["score"],
+        signal["price"],
+        signal["score"],
         result
     )
 
     await message.answer(
-        f"🔥 LIVE BUY\n\n"
+
+        f"🟢 LIVE BUY\n\n"
+
         f"{symbol}\n"
-        f"Цена: {signal_data['price']:.4f}"
+
+        f"Цена: "
+        f"{signal['price']:.4f}\n"
+
+        f"Сумма: "
+        f"{amount} USDT"
     )
 
 
 # =========================
-# LIVE SELL
+# MANUAL SELL LIVE
 # =========================
 
 async def do_live_sell(message):
-
-    if not is_live_allowed():
-
-        await message.answer(
-            "⛔ LIVE торговля запрещена."
-        )
-
-        return
 
     positions = get_open_positions()
 
     if not positions:
 
         await message.answer(
-            "📋 Открытых позиций нет."
+            "Позиции отсутствуют."
         )
 
         return
 
-    symbol = list(positions.keys())[0]
+    symbol = list(
+        positions.keys()
+    )[0]
 
     position = positions[symbol]
 
-    signal_data = build_signal(symbol)
+    signal = build_signal(
+        symbol
+    )
 
     result = place_market_sell(
         symbol,
         position["amount_usdt"],
-        signal_data["price"]
+        signal["price"]
     )
 
     close_position(
         symbol,
-        signal_data["price"],
-        "MANUAL LIVE SELL"
+        signal["price"],
+        "MANUAL SELL"
     )
 
     add_history(
         "MANUAL LIVE SELL",
         symbol,
-        signal_data["price"],
-        signal_data["score"],
+        signal["price"],
+        signal["score"],
         result
     )
 
     await message.answer(
-        f"🔥 LIVE SELL\n\n"
+
+        f"🔴 LIVE SELL\n\n"
+
         f"{symbol}\n"
-        f"Цена: {signal_data['price']:.4f}"
+
+        f"Цена: "
+        f"{signal['price']:.4f}"
     )
 # =========================
 # AUTOTRADE LOOP
 # =========================
 
 async def autotrade_loop(chat_id):
+
     global autotrade_enabled
     global current_trade_symbol
 
     while autotrade_enabled:
+
         try:
+
+            # Синхронизация с реальными активами OKX
+            sync_positions_with_okx()
+
             allowed, reason = can_trade_today()
 
             if not allowed:
+
                 await bot.send_message(
                     chat_id,
                     f"⛔ Автоторговля остановлена\n\n{reason}"
                 )
+
                 autotrade_enabled = False
                 save_runtime_settings()
+
                 break
 
             positions = get_open_positions()
 
+            # =========================
+            # СОПРОВОЖДЕНИЕ ПОЗИЦИЙ
+            # =========================
+
             for symbol, position in positions.items():
-                signal_data = build_signal(symbol, "15m")
-                current_price = signal_data["price"]
 
-                update_trailing_stop(symbol, current_price)
+                try:
 
-                positions = get_open_positions()
-                position = positions[symbol]
+                    signal_data = build_signal(
+                        symbol,
+                        "15m"
+                    )
 
-                pnl_percent = (
-                    (current_price - position["entry_price"])
-                    / position["entry_price"]
-                ) * 100
+                    current_price = signal_data["price"]
 
-                if current_price >= position["take_profit_price"]:
-                    if not is_demo():
+                    update_trailing_stop(
+                        symbol,
+                        current_price
+                    )
+
+                    positions = get_open_positions()
+
+                    if symbol not in positions:
+                        continue
+
+                    position = positions[symbol]
+
+                    pnl_percent = (
+                        (
+                            current_price
+                            - position["entry_price"]
+                        )
+                        /
+                        position["entry_price"]
+                    ) * 100
+
+                    # =========================
+                    # TAKE PROFIT
+                    # =========================
+
+                    if (
+                        current_price
+                        >= position["take_profit_price"]
+                    ):
+
                         place_market_sell(
                             symbol,
                             position["amount_usdt"],
                             current_price
                         )
 
-                    close_position(
-                        symbol,
-                        current_price,
-                        "TAKE PROFIT"
-                    )
+                        close_position(
+                            symbol,
+                            current_price,
+                            "TAKE PROFIT"
+                        )
 
-                    add_history(
-                        "AUTO TP",
-                        symbol,
-                        current_price,
-                        signal_data["score"]
-                    )
+                        add_history(
+                            "AUTO TP",
+                            symbol,
+                            current_price,
+                            signal_data["score"]
+                        )
 
-                    await bot.send_message(
-                        chat_id,
-                        f"🎯 TAKE PROFIT\n\n"
-                        f"{symbol}\n"
-                        f"PnL: {pnl_percent:.2f}%"
-                    )
+                        await bot.send_message(
 
-                    continue
+                            chat_id,
 
-                if current_price <= position["stop_loss_price"]:
-                    if not is_demo():
+                            f"🎯 TAKE PROFIT\n\n"
+
+                            f"{symbol}\n"
+
+                            f"PnL: "
+                            f"{pnl_percent:.2f}%"
+                        )
+
+                        continue
+
+                    # =========================
+                    # STOP LOSS
+                    # =========================
+
+                    if (
+                        current_price
+                        <= position["stop_loss_price"]
+                    ):
+
                         place_market_sell(
                             symbol,
                             position["amount_usdt"],
                             current_price
                         )
 
-                    close_position(
-                        symbol,
-                        current_price,
-                        "STOP LOSS"
+                        close_position(
+                            symbol,
+                            current_price,
+                            "STOP LOSS"
+                        )
+
+                        add_history(
+                            "AUTO SL",
+                            symbol,
+                            current_price,
+                            signal_data["score"]
+                        )
+
+                        await bot.send_message(
+
+                            chat_id,
+
+                            f"🛑 STOP LOSS\n\n"
+
+                            f"{symbol}\n"
+
+                            f"PnL: "
+                            f"{pnl_percent:.2f}%"
+                        )
+
+                        continue
+
+                    # =========================
+                    # SELL SIGNAL
+                    # =========================
+
+                    decision = (
+                        multi_timeframe_decision_for_symbol(
+                            symbol
+                        )
                     )
 
-                    add_history(
-                        "AUTO SL",
-                        symbol,
-                        current_price,
-                        signal_data["score"]
-                    )
+                    if decision["signal"] == "SELL":
 
-                    await bot.send_message(
-                        chat_id,
-                        f"🛑 STOP LOSS\n\n"
-                        f"{symbol}\n"
-                        f"PnL: {pnl_percent:.2f}%"
-                    )
-
-                    continue
-
-                decision = multi_timeframe_decision_for_symbol(symbol)
-
-                if decision["signal"] == "SELL":
-                    if not is_demo():
                         place_market_sell(
                             symbol,
                             position["amount_usdt"],
                             current_price
                         )
 
-                    close_position(
-                        symbol,
-                        current_price,
-                        "SELL SIGNAL"
-                    )
+                        close_position(
+                            symbol,
+                            current_price,
+                            "SELL SIGNAL"
+                        )
 
-                    add_history(
-                        "AUTO SELL",
-                        symbol,
-                        current_price,
-                        decision["avg_score"]
-                    )
+                        add_history(
+                            "AUTO SELL",
+                            symbol,
+                            current_price,
+                            decision["avg_score"]
+                        )
 
-                    await bot.send_message(
-                        chat_id,
-                        f"🔴 SELL SIGNAL\n\n"
-                        f"{symbol}\n"
-                        f"PnL: {pnl_percent:.2f}%"
-                    )
+                        await bot.send_message(
+
+                            chat_id,
+
+                            f"🔴 SELL SIGNAL\n\n"
+
+                            f"{symbol}\n"
+
+                            f"PnL: "
+                            f"{pnl_percent:.2f}%"
+                        )
+
+                except Exception:
+                    pass
+
+            # =========================
+            # ПОИСК НОВОЙ СДЕЛКИ
+            # =========================
 
             positions = get_open_positions()
 
-            if len(positions) < risk_settings["max_open_positions"]:
+            if (
+                len(positions)
+                < risk_settings["max_open_positions"]
+            ):
+
                 if auto_select_symbol:
-                    symbol, best_data = choose_best_symbol()
+
+                    symbol, best_data = (
+                        choose_best_symbol()
+                    )
+
                 else:
+
                     symbol = current_trade_symbol
 
                 current_trade_symbol = symbol
 
-                decision = multi_timeframe_decision_for_symbol(symbol)
+                decision = (
+                    multi_timeframe_decision_for_symbol(
+                        symbol
+                    )
+                )
 
                 if decision["signal"] == "BUY":
-                    allowed, reason = can_open_new_position(symbol)
+
+                    allowed, reason = (
+                        can_open_new_position(
+                            symbol
+                        )
+                    )
 
                     if allowed:
-                        amount = get_trade_amount_usdt()
 
-                        if not is_demo():
-                            place_market_buy(
-                                symbol,
-                                amount
-                            )
+                        amount = (
+                            get_trade_amount_usdt()
+                        )
+
+                        place_market_buy(
+                            symbol,
+                            amount
+                        )
 
                         open_position(
                             symbol,
@@ -1599,22 +1781,38 @@ async def autotrade_loop(chat_id):
                         )
 
                         await bot.send_message(
+
                             chat_id,
+
                             f"🟢 AUTO BUY\n\n"
+
                             f"{symbol}\n"
-                            f"Цена: {decision['price']:.4f}\n"
-                            f"Сила сигнала: {decision['avg_score']}%"
+
+                            f"Цена: "
+                            f"{decision['price']:.4f}\n"
+
+                            f"Сила сигнала: "
+                            f"{decision['avg_score']}%\n"
+
+                            f"Сумма: "
+                            f"{amount} USDT"
                         )
 
             save_runtime_settings()
 
         except Exception as e:
+
             await bot.send_message(
+
                 chat_id,
+
                 f"❌ Ошибка автоторговли\n\n{e}"
             )
 
-        await asyncio.sleep(AUTO_INTERVAL)
+        await asyncio.sleep(
+            AUTO_INTERVAL
+        )
+
 
 # =========================
 # AUTO ON / OFF
@@ -1664,9 +1862,11 @@ async def disable_autotrade(message):
 
 async def show_status(message):
 
+    sync_positions_with_okx()
+
     positions = get_open_positions()
 
-    mode = "DEMO 🧪" if is_demo() else "LIVE 🔥"
+    mode = "LIVE 🔥" if is_live_allowed() else "DEMO 🧪"
 
     await message.answer(
 
@@ -1675,89 +1875,52 @@ async def show_status(message):
         f"Режим: {mode}\n"
 
         f"LIVE разрешён: "
-
         f"{'✅' if is_live_allowed() else '❌'}\n\n"
 
         f"Автоторговля: "
-
         f"{'✅' if autotrade_enabled else '❌'}\n"
 
         f"Автовыбор монеты: "
-
-        f"{'✅' if auto_select_symbol else '❌'}\n"
+        f"{'✅' if auto_select_symbol else '❌'}\n\n"
 
         f"Текущая монета:\n"
 
         f"{current_trade_symbol}\n\n"
 
         f"Открытых позиций: "
-
         f"{len(positions)}"
     )
 
 
 async def show_balance(message):
 
-    try:
+    details = get_account_details()
 
-        result = account_api.get_account_balance()
+    text = "💰 Баланс\n\n"
 
-        details = result["data"][0]["details"]
+    for item in details:
 
-        text = "💰 Баланс\n\n"
+        balance = safe_float(
+            item.get("cashBal")
+        )
 
-        for item in details:
+        if balance > 0:
 
-            balance = safe_float(
-                item.get("cashBal")
+            text += (
+                f"{item['ccy']}: "
+                f"{balance:.8f}\n"
             )
 
-            if balance > 0:
-
-                text += (
-                    f"{item['ccy']}: "
-                    f"{balance:.8f}\n"
-                )
-
-        await message.answer(text)
-
-    except Exception as e:
-
-        await message.answer(
-            f"❌ {e}"
-        )
+    await message.answer(text)
 
 
 async def show_signal(message):
 
-    signal = build_signal(
-        current_trade_symbol
-    )
+    signal = build_signal()
 
     await message.answer(
         format_signal(signal)
     )
-
-
-async def show_market(message):
-
-    decision = multi_timeframe_decision_for_symbol(
-        current_trade_symbol
-    )
-
-    text = (
-        f"🌐 Рынок\n\n"
-
-        f"{current_trade_symbol}\n\n"
-
-        f"Сигнал: "
-        f"{decision['signal']}\n"
-
-        f"Сила: "
-        f"{decision['avg_score']}%"
-    )
-
-    await message.answer(text)
 
 
 async def show_scan(message):
@@ -1766,12 +1929,12 @@ async def show_scan(message):
 
     text = "🔎 Сканер\n\n"
 
-    for item in results[:10]:
+    for row in results[:10]:
 
         text += (
-            f"{item['symbol']} | "
-            f"{item['signal']} | "
-            f"{item['score']}%\n"
+            f"{row['symbol']} | "
+            f"{row['signal']} | "
+            f"{row['score']}%\n"
         )
 
     await message.answer(text)
@@ -1788,36 +1951,33 @@ async def show_best(message):
         f"{symbol}\n\n"
 
         f"Сигнал: "
-
         f"{data['signal']}\n"
 
         f"Сила: "
-
         f"{data['score']}%"
     )
 
 
 async def show_top3(message):
 
-    results = get_top3()
+    rows = get_top3()
 
     text = "🥇 ТОП-3\n\n"
 
-    for i, item in enumerate(
-        results,
-        start=1
-    ):
+    for i, row in enumerate(rows, start=1):
 
         text += (
             f"{i}. "
-            f"{item['symbol']} | "
-            f"{item['score']}%\n"
+            f"{row['symbol']} | "
+            f"{row['score']}%\n"
         )
 
     await message.answer(text)
 
 
 async def show_positions(message):
+
+    sync_positions_with_okx()
 
     positions = get_open_positions()
 
@@ -1833,9 +1993,9 @@ async def show_positions(message):
 
     for symbol, position in positions.items():
 
-        current_price = build_signal(
-            symbol
-        )["price"]
+        current_price = (
+            build_signal(symbol)["price"]
+        )
 
         pnl = (
             (
@@ -1863,51 +2023,6 @@ async def show_positions(message):
     await message.answer(text)
 
 
-async def show_history(message):
-
-    rows = get_history()
-
-    if not rows:
-
-        await message.answer(
-            "📜 История пуста."
-        )
-
-        return
-
-    text = "📜 История\n\n"
-
-    for row in rows:
-
-        text += (
-            f"{row[0]}\n"
-            f"{row[1]}\n"
-            f"{row[2]}\n\n"
-        )
-
-    await message.answer(text)
-
-
-async def show_statistics(message):
-
-    trades = get_closed_trades(
-        1000
-    )
-
-    await message.answer(
-
-        f"📈 Статистика\n\n"
-
-        f"Сделок: "
-
-        f"{len(trades)}\n"
-
-        f"WinRate: "
-
-        f"{winrate():.2f}%"
-    )
-
-
 async def show_pnl(message):
 
     await message.answer(
@@ -1920,37 +2035,38 @@ async def show_pnl(message):
     )
 
 
-async def show_risk(message):
+async def show_statistics(message):
+
+    trades = get_closed_trades()
 
     await message.answer(
 
-        f"🛡 Риск\n\n"
+        f"📈 Статистика\n\n"
 
-        f"Сделка: "
+        f"Сделок: "
+        f"{len(trades)}\n\n"
 
-        f"{risk_settings['amount_usdt']} USDT\n"
+        f"WinRate: "
+        f"{winrate():.2f}%\n\n"
 
-        f"SL: "
+        f"Прибыль:\n"
 
-        f"{risk_settings['stop_loss_percent']}%\n"
-
-        f"TP: "
-
-        f"{risk_settings['take_profit_percent']}%\n"
-
-        f"Trailing: "
-
-        f"{risk_settings['trailing_stop_percent']}%"
+        f"{total_pnl_usdt():.2f} USDT"
     )
 
 
-async def show_current_symbol(message):
+async def show_daily_report(message):
 
     await message.answer(
 
-        f"💱 Текущая монета\n\n"
+        f"📅 Отчет за день\n\n"
 
-        f"{current_trade_symbol}"
+        f"Сделок: "
+        f"{trades_today_count()}\n\n"
+
+        f"Прибыль:\n"
+
+        f"{pnl_today_usdt():.2f} USDT"
     )
 
 
@@ -1978,9 +2094,6 @@ async def text_router(message: types.Message):
     elif "сигнал" in text:
         await show_signal(message)
 
-    elif "рынок" in text:
-        await show_market(message)
-
     elif "сканер" in text:
         await show_scan(message)
 
@@ -1992,27 +2105,6 @@ async def text_router(message: types.Message):
 
     elif "позиц" in text:
         await show_positions(message)
-
-    elif "история" in text:
-        await show_history(message)
-
-    elif "статистика" in text:
-        await show_statistics(message)
-
-    elif "pnl" in text:
-        await show_pnl(message)
-
-    elif "риск" in text:
-        await show_risk(message)
-
-    elif "текущая" in text:
-        await show_current_symbol(message)
-
-    elif "купить demo" in text:
-        await do_demo_buy(message)
-
-    elif "продать demo" in text:
-        await do_demo_sell(message)
 
     elif "купить live" in text:
         await do_live_buy(message)
@@ -2038,6 +2130,23 @@ async def text_router(message: types.Message):
             "🧠 Автовыбор переключён."
         )
 
+    elif "pnl" in text:
+        await show_pnl(message)
+
+    elif "статистика" in text:
+        await show_statistics(message)
+
+    elif "отчет" in text:
+        await show_daily_report(message)
+
+    elif "синхронизация" in text:
+
+        sync_positions_with_okx()
+
+        await message.answer(
+            "🔄 Синхронизация OKX выполнена."
+        )
+
     else:
 
         await message.answer(
@@ -2055,8 +2164,10 @@ async def main():
 
     load_runtime_settings()
 
+    sync_positions_with_okx()
+
     print(
-        "OKX ULTRA PRO MAX v2 started"
+        "OKX ULTRA PRO MAX V4 STARTED"
     )
 
     await dp.start_polling(bot)
