@@ -2,7 +2,7 @@ import os
 import json
 import sqlite3
 import asyncio
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 import pandas as pd
 
@@ -34,7 +34,7 @@ TRADE_AMOUNT_USDT = float(os.getenv("TRADE_AMOUNT_USDT", "5"))
 AUTO_INTERVAL = int(os.getenv("AUTO_INTERVAL", "300"))
 DB_FILE = "bot.db"
 
-BUY_SCORE = int(os.getenv("BUY_SCORE", "68"))
+BUY_SCORE = int(os.getenv("BUY_SCORE", "80"))
 SELL_SCORE = int(os.getenv("SELL_SCORE", "35"))
 
 MAX_OPEN_POSITIONS = int(os.getenv("MAX_OPEN_POSITIONS", "3"))
@@ -105,17 +105,24 @@ sell_signal_locks = set()
 risk_settings = {
     "amount_usdt": TRADE_AMOUNT_USDT,
     "max_amount_usdt": 25.0,
-    "stop_loss_percent": 2.0,
+
+    "stop_loss_percent": 2.5,
     "take_profit_percent": 4.0,
-    "trailing_stop_percent": 1.5,
-    "buy_score": BUY_SCORE,
+    "trailing_stop_percent": 1.2,
+
+    "buy_score": 80,
     "sell_score": SELL_SCORE,
+
     "max_open_positions": MAX_OPEN_POSITIONS,
     "max_trades_day": MAX_TRADES_DAY,
+
     "auto_amount_enabled": True,
     "balance_usage_percent": 10.0,
     "min_trade_usdt": 5.0,
     "max_trade_usdt": 25.0,
+
+    "cooldown_after_loss_minutes": 60,
+    "min_adx": 20,
 }
 
 
@@ -515,6 +522,38 @@ def clear_open_positions():
 
     conn.commit()
     conn.close()
+
+
+def set_symbol_cooldown(symbol, reason="LOSS"):
+    cooldowns = db_get("symbol_cooldowns", {})
+
+    cooldowns[symbol] = {
+        "until": (
+            datetime.now()
+            + timedelta(minutes=risk_settings["cooldown_after_loss_minutes"])
+        ).timestamp(),
+        "reason": reason,
+    }
+
+    db_set("symbol_cooldowns", cooldowns)
+
+
+def is_symbol_in_cooldown(symbol):
+    cooldowns = db_get("symbol_cooldowns", {})
+
+    if symbol not in cooldowns:
+        return False, ""
+
+    until = cooldowns[symbol].get("until", 0)
+
+    if datetime.now().timestamp() >= until:
+        cooldowns.pop(symbol, None)
+        db_set("symbol_cooldowns", cooldowns)
+        return False, ""
+
+    minutes_left = int((until - datetime.now().timestamp()) / 60)
+
+    return True, f"Cooldown после убытка: {minutes_left} мин."
 # =========================
 # OKX BALANCE / SYNC
 # =========================
@@ -864,7 +903,37 @@ def add_indicators(df):
         .mean()
         .fillna(0)
     )
+    plus_dm = df["high"].diff()
+    minus_dm = -df["low"].diff()
 
+    plus_dm = plus_dm.where(
+        (plus_dm > minus_dm) & (plus_dm > 0),   
+        0.0
+    )
+
+    minus_dm = minus_dm.where(
+        (minus_dm > plus_dm) & (minus_dm > 0),
+        0.0
+    )
+
+    tr14 = true_range.rolling(14).sum()
+
+    plus_di = 100 * (
+        plus_dm.rolling(14).sum()
+        / tr14.replace(0, 1e-9)
+    )
+
+    minus_di = 100 * (
+        minus_dm.rolling(14).sum()
+        / tr14.replace(0, 1e-9)
+    )
+
+    dx = (
+        abs(plus_di - minus_di)
+        / (plus_di + minus_di).replace(0, 1e-9)
+    ) * 100
+
+    df["adx"] = dx.rolling(14).mean().fillna(0)
     return df
 
 
@@ -1076,6 +1145,7 @@ def build_signal(symbol=None, bar="15m"):
         "bb_lower": safe_float(last["bb_lower"]),
         "vol_avg": safe_float(last["vol_avg"]),
         "atr": safe_float(last["atr"]),
+        "adx": safe_float(last["adx"]),
     }
 
     score, signal = calculate_score(data)
@@ -1353,21 +1423,22 @@ def can_open_new_position(symbol):
     positions = get_open_positions()
 
     if symbol in positions:
-        return (
-            False,
-            "Позиция уже существует"
-        )
+        return False, "Позиция уже существует"
 
-    if (
-        len(positions)
-        >= risk_settings["max_open_positions"]
-    ):
-        return (
-            False,
-            "Достигнут лимит позиций"
-        )
+    if len(positions) >= risk_settings["max_open_positions"]:
+        return False, "Достигнут лимит позиций"
 
-    return can_trade_today()
+    in_cooldown, reason = is_symbol_in_cooldown(symbol)
+
+    if in_cooldown:
+        return False, reason
+
+    allowed, reason = can_trade_today()
+
+    if not allowed:
+        return False, reason
+
+    return True, "OK"
 
 
 # =========================
@@ -1635,6 +1706,7 @@ async def autotrade_loop(chat_id):
                             current_price,
                             "STOP LOSS"
                         )
+                        set_symbol_cooldown(symbol, "STOP LOSS")
 
                         sync_positions_with_okx()
 
@@ -1756,7 +1828,16 @@ async def autotrade_loop(chat_id):
                     )
                 )
 
-                if decision["signal"] == "BUY":
+                signal_data_15m = build_signal(symbol, "15m")
+
+                strong_buy = (
+                    decision["signal"] == "BUY"
+                    and decision["avg_score"] >= 80
+                    and signal_data_15m["ema50"] > signal_data_15m["ema200"]
+                    and signal_data_15m["adx"] >= risk_settings["min_adx"]
+                )
+
+                if strong_buy:
 
                     allowed, reason = (
                         can_open_new_position(
