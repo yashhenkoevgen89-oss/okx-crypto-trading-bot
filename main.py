@@ -1992,118 +1992,230 @@ async def show_pnl(
 # =========================
 
 async def show_status(message):
-
+    sync_positions_with_okx()
     positions = get_open_positions()
 
-    text = (
-        "📊 Статус\n\n"
-        f"Автоторговля: {'🟢 ВКЛ' if autotrade_enabled else '🔴 ВЫКЛ'}\n"
-        f"Открытых позиций: {len(positions)}\n"
-        f"Текущая монета: {current_trade_symbol}"
-    )
+    mode = "LIVE 🔥" if is_live_allowed() else "DEMO 🧪"
 
     await message.answer(
-        text,
+        f"📊 Статус\n\n"
+        f"Режим: {mode}\n"
+        f"Автоторговля: {'🟢 ВКЛ' if autotrade_enabled else '🔴 ВЫКЛ'}\n"
+        f"Автовыбор монеты: {'✅' if auto_select_symbol else '❌'}\n\n"
+        f"Текущая монета:\n{current_trade_symbol}\n\n"
+        f"Открытых позиций: {len(positions)}",
         reply_markup=keyboard
     )
 
 
 async def show_balance(message):
+    balances = get_okx_balance()
 
-    balance = get_usdt_balance()
+    text = "💰 Баланс\n\n"
+
+    for item in balances:
+        if item["eq_usd"] >= 0.01:
+            text += (
+                f"{item['ccy']}: "
+                f"{item['avail_bal']:.8f} "
+                f"≈ {item['eq_usd']:.2f} USDT\n"
+            )
+
+    await message.answer(text, reply_markup=keyboard)
+
+
+async def show_signal(message):
+    signal = build_signal(current_trade_symbol, "15m")
+
+    if not signal:
+        await message.answer("📡 Сигнал недоступен.", reply_markup=keyboard)
+        return
 
     await message.answer(
-        f"💰 USDT: {balance:.2f}",
+        f"📡 Сигнал\n\n"
+        f"{signal['symbol']}\n"
+        f"Цена: {signal['price']:.4f}\n"
+        f"Решение: {signal['signal']}\n"
+        f"Сила: {signal['score']}%\n\n"
+        f"RSI: {signal['rsi']:.2f}\n"
+        f"MACD: {signal['macd']:.4f}\n"
+        f"EMA50: {signal['ema50']:.4f}\n"
+        f"EMA200: {signal['ema200']:.4f}\n"
+        f"ADX: {signal['adx']:.2f}",
         reply_markup=keyboard
     )
 
 
-async def show_positions(message):
+async def show_market(message):
+    decision = multi_timeframe_decision_for_symbol(current_trade_symbol)
+    signal = build_signal(current_trade_symbol, "15m")
 
-    positions = get_open_positions()
-
-    if not positions:
-
-        await message.answer(
-            "📋 Нет открытых позиций",
-            reply_markup=keyboard
-        )
-
+    if not signal:
+        await message.answer("🌐 Рынок недоступен.", reply_markup=keyboard)
         return
 
-    text = "📋 Позиции\n\n"
-
-    for symbol, position in positions.items():
-
-        current_price = get_current_price(
-            symbol
-        )
-
-        pnl = (
-            (
-                current_price
-                - position["entry_price"]
-            )
-            /
-            position["entry_price"]
-        ) * 100
-
-        text += (
-            f"{symbol}\n"
-            f"PnL: {pnl:.2f}%\n\n"
-        )
+    trend = "Восходящий 📈" if signal["ema50"] > signal["ema200"] else "Нисходящий 📉"
+    flat = "Нет ✅" if signal["adx"] >= risk_settings["min_adx"] else "Да ⚠️"
 
     await message.answer(
-        text,
+        f"🌐 Рынок\n\n"
+        f"{current_trade_symbol}\n\n"
+        f"Тренд: {trend}\n"
+        f"Флэт: {flat}\n"
+        f"ADX: {signal['adx']:.2f}\n\n"
+        f"Итог: {decision['signal']}\n"
+        f"Сила: {decision['avg_score']}%",
+        reply_markup=keyboard
+    )
+
+
+async def show_scanner(message):
+    text = "🔎 Сканер\n\n"
+    found = 0
+
+    for symbol in WATCHLIST:
+        try:
+            decision = multi_timeframe_decision_for_symbol(symbol)
+            signal = build_signal(symbol, "15m")
+
+            if not signal:
+                continue
+
+            if signal["ema50"] > signal["ema200"] and signal["adx"] >= risk_settings["min_adx"]:
+                text += (
+                    f"{symbol} | {decision['signal']} | "
+                    f"{decision['avg_score']}% | ADX {signal['adx']:.1f}\n"
+                )
+                found += 1
+
+        except Exception:
+            continue
+
+    if found == 0:
+        text += "Подходящих монет сейчас нет."
+
+    await message.answer(text, reply_markup=keyboard)
+
+
+async def show_best_symbol(message):
+    symbol, data = choose_best_symbol()
+
+    await message.answer(
+        f"🏆 Лучшая монета\n\n"
+        f"{symbol}\n"
+        f"Сила: {data.get('score', 0)}%\n"
+        f"ADX: {data.get('adx', 0):.2f}",
         reply_markup=keyboard
     )
 
 
 async def show_top3(message):
-
     top = get_top3_symbols()
+
+    if not top:
+        await message.answer("🥇 TOP-3 пуст.", reply_markup=keyboard)
+        return
 
     text = "🥇 TOP-3\n\n"
 
-    for row in top:
-
+    for i, row in enumerate(top, start=1):
         text += (
-            f"{row['symbol']}\n"
-            f"Score: {row['score']}\n"
+            f"{i}. {row['symbol']}\n"
+            f"Сила: {row['score']}%\n"
             f"ADX: {row['adx']:.2f}\n\n"
         )
 
-    await message.answer(
-        text,
-        reply_markup=keyboard
-    )
+    await message.answer(text, reply_markup=keyboard)
+
+
+async def show_positions(message):
+    sync_positions_with_okx()
+    positions = get_open_positions()
+
+    if not positions:
+        await message.answer("📋 Нет открытых позиций", reply_markup=keyboard)
+        return
+
+    text = "📋 Позиции\n\n"
+
+    for symbol, position in positions.items():
+        current_price = get_current_price(symbol)
+
+        pnl = (
+            (current_price - position["entry_price"])
+            / position["entry_price"]
+        ) * 100 if position["entry_price"] > 0 else 0
+
+        text += (
+            f"{symbol}\n"
+            f"Вход: {position['entry_price']:.4f}\n"
+            f"Текущая: {current_price:.4f}\n"
+            f"Trailing stop: {position['stop_loss_price']:.4f}\n"
+            f"PnL: {pnl:.2f}%\n\n"
+        )
+
+    await message.answer(text, reply_markup=keyboard)
 
 
 async def show_history(message):
+    rows = get_history(20)
 
-    rows = get_history(15)
+    if not rows:
+        await message.answer("📜 История пуста.", reply_markup=keyboard)
+        return
 
     text = "📜 История\n\n"
 
     for row in rows:
-
         text += (
             f"{row[0]}\n"
             f"{row[1]}\n"
-            f"{row[2]}\n\n"
+            f"{row[2]}\n"
+            f"Цена: {row[3]:.4f}\n"
+            f"Сила: {row[4]}%\n\n"
         )
 
+    await message.answer(text, reply_markup=keyboard)
+
+
+async def show_auto_status(message):
+    positions = get_open_positions()
+
     await message.answer(
-        text,
+        f"🤖 Авто статус\n\n"
+        f"Автоторговля: {'🟢 ВКЛ' if autotrade_enabled else '🔴 ВЫКЛ'}\n"
+        f"Автовыбор монеты: {'✅' if auto_select_symbol else '❌'}\n"
+        f"Текущая монета: {current_trade_symbol}\n"
+        f"Открытых позиций: {len(positions)}",
+        reply_markup=keyboard
+    )
+
+
+async def show_current_symbol(message):
+    await message.answer(
+        f"💱 Текущая монета\n\n{current_trade_symbol}",
+        reply_markup=keyboard
+    )
+
+
+async def show_risk(message):
+    await message.answer(
+        f"🛡 Риск\n\n"
+        f"BUY от: {risk_settings['buy_score']}%\n"
+        f"SELL до: {risk_settings['sell_score']}%\n"
+        f"ADX минимум: {risk_settings['min_adx']}\n"
+        f"Trailing stop: {risk_settings['trailing_stop_percent']}%\n"
+        f"Cooldown после убытка: {risk_settings['cooldown_after_loss_minutes']} мин.\n"
+        f"Макс. позиций: {risk_settings['max_open_positions']}\n"
+        f"Макс. сделок/день: {risk_settings['max_trades_day']}",
         reply_markup=keyboard
     )
 
 
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message):
-
     await message.answer(
-        "🤖 OKX ULTRA PRO MAX V6",
+        "🤖 OKX ULTRA PRO MAX V6 запущен",
         reply_markup=keyboard
     )
 
@@ -2114,57 +2226,73 @@ async def start_cmd(message: types.Message):
 
 @dp.message()
 async def text_router(message: types.Message):
-
     global autotrade_enabled
+    global auto_select_symbol
 
-    text = (
-        message.text.lower()
-        if message.text
-        else ""
-    )
+    text = message.text.lower().strip() if message.text else ""
 
     if "статус" in text and "авто" not in text:
-
         await show_status(message)
 
     elif "баланс" in text:
-
         await show_balance(message)
 
-    elif "позиц" in text:
+    elif "сигнал" in text:
+        await show_signal(message)
 
-        await show_positions(message)
+    elif "рынок" in text:
+        await show_market(message)
+
+    elif "сканер" in text:
+        await show_scanner(message)
+
+    elif "лучшая" in text:
+        await show_best_symbol(message)
 
     elif "топ" in text:
-
         await show_top3(message)
 
-    elif "история" in text:
+    elif "позиц" in text:
+        await show_positions(message)
 
+    elif "история" in text:
         await show_history(message)
 
     elif "статист" in text:
-
         await show_statistics(message)
 
     elif "pnl" in text:
-
         await show_pnl(message)
 
     elif "днев" in text:
-
         await show_daily_report(message)
 
     elif "недель" in text:
-
         await show_weekly_report(message)
 
-    elif "месяч" in text:
-
+    elif "месяч" in text or "месяц" in text:
         await show_monthly_report(message)
 
-    elif "синх" in text:
+    elif "риск" in text:
+        await show_risk(message)
 
+    elif "авто статус" in text:
+        await show_auto_status(message)
+
+    elif "авто монета" in text:
+        auto_select_symbol = not auto_select_symbol
+        save_runtime_settings()
+
+        await message.answer(
+            f"🧠 Авто монета\n\n"
+            f"Автовыбор монеты: {'✅ ВКЛ' if auto_select_symbol else '❌ ВЫКЛ'}",
+            reply_markup=keyboard
+        )
+
+    elif "текущ" in text:
+        await show_current_symbol(message)
+
+    elif "синх" in text:
         sync_positions_with_okx()
 
         await message.answer(
@@ -2173,25 +2301,28 @@ async def text_router(message: types.Message):
         )
 
     elif "сброс" in text:
-
         clear_open_positions()
+        sync_positions_with_okx()
 
         await message.answer(
-            "♻️ Позиции очищены",
+            "♻️ Позиции очищены и синхронизированы",
             reply_markup=keyboard
         )
 
     elif "авто вкл" in text:
-
-        if not autotrade_enabled:
-
-            autotrade_enabled = True
-
-            asyncio.create_task(
-                autotrade_loop(
-                    message.chat.id
-                )
+        if autotrade_enabled:
+            await message.answer(
+                "🟢 Автоторговля уже включена",
+                reply_markup=keyboard
             )
+            return
+
+        autotrade_enabled = True
+        save_runtime_settings()
+
+        asyncio.create_task(
+            autotrade_loop(message.chat.id)
+        )
 
         await message.answer(
             "🟢 Автоторговля включена",
@@ -2199,16 +2330,22 @@ async def text_router(message: types.Message):
         )
 
     elif "авто выкл" in text:
-
         autotrade_enabled = False
+        save_runtime_settings()
 
         await message.answer(
             "🔴 Автоторговля выключена",
             reply_markup=keyboard
         )
 
-    else:
+    elif "купить" in text or "продать" in text or "demo" in text:
+        await message.answer(
+            "⛔ Ручная покупка/продажа и DEMO-команды отключены.\n"
+            "Бот работает только через автоторговлю.",
+            reply_markup=keyboard
+        )
 
+    else:
         await message.answer(
             "❓ Команда не распознана",
             reply_markup=keyboard
