@@ -113,11 +113,12 @@ risk_settings = {
 
     "stop_loss_percent": 2.5,
     "take_profit_percent": 4.0,
-    "trailing_stop_percent": 1.2,
+    "trailing_stop_percent": 1.0,
+    "trailing_start_profit_percent": 1.0,
 
-    "buy_score": BUY_SCORE,
+    "buy_score": 85,
     "sell_score": SELL_SCORE,
-    "min_adx": MIN_ADX,
+    "min_adx": 25,
 
     "max_open_positions": MAX_OPEN_POSITIONS,
     "max_trades_day": MAX_TRADES_DAY,
@@ -127,7 +128,7 @@ risk_settings = {
     "min_trade_usdt": 5.0,
     "max_trade_usdt": 25.0,
 
-    "cooldown_after_loss_minutes": COOLDOWN_AFTER_LOSS_MINUTES,
+    "cooldown_after_loss_minutes": 180,
 }
 
 
@@ -1091,41 +1092,24 @@ def build_signal(symbol, timeframe="15m"):
     df = add_indicators(df)
 
     last = df.iloc[-1]
+    prev = df.iloc[-2]
 
     score = 0
 
-    # RSI
+    if 45 <= last["rsi"] <= 70:
+        score += 20
 
-    if (
-        45
-        <= last["rsi"]
-        <= 70
-    ):
+    if last["macd"] > last["macd_signal"]:
+        score += 20
+
+    if last["ema50"] > last["ema200"]:
         score += 25
 
-    # MACD
+    if last["ema50"] > prev["ema50"]:
+        score += 15
 
-    if (
-        last["macd"]
-        > last["macd_signal"]
-    ):
-        score += 25
-
-    # EMA trend
-
-    if (
-        last["ema50"]
-        > last["ema200"]
-    ):
-        score += 25
-
-    # ADX trend strength
-
-    if (
-        last["adx"]
-        >= risk_settings["min_adx"]
-    ):
-        score += 25
+    if last["adx"] >= risk_settings["min_adx"]:
+        score += 20
 
     signal = "HOLD"
 
@@ -1147,6 +1131,7 @@ def build_signal(symbol, timeframe="15m"):
 
         "ema50": safe_float(last["ema50"]),
         "ema200": safe_float(last["ema200"]),
+        "ema50_prev": safe_float(prev["ema50"]),
 
         "adx": safe_float(last["adx"]),
         "atr": safe_float(last["atr"]),
@@ -1165,13 +1150,9 @@ def multi_timeframe_decision_for_symbol(symbol):
         )
 
         if signal_data:
-
-            results.append(
-                signal_data
-            )
+            results.append(signal_data)
 
     if not results:
-
         return {
             "signal": "HOLD",
             "avg_score": 0,
@@ -1179,21 +1160,16 @@ def multi_timeframe_decision_for_symbol(symbol):
         }
 
     avg_score = (
-        sum(
-            x["score"]
-            for x in results
-        )
+        sum(x["score"] for x in results)
         / len(results)
     )
 
     signal = "HOLD"
 
     if avg_score >= risk_settings["buy_score"]:
-
         signal = "BUY"
 
     elif avg_score <= risk_settings["sell_score"]:
-
         signal = "SELL"
 
     return {
@@ -1201,6 +1177,50 @@ def multi_timeframe_decision_for_symbol(symbol):
         "avg_score": round(avg_score, 2),
         "price": results[-1]["price"],
     }
+
+
+def btc_market_filter_ok():
+
+    btc = build_signal("BTC-USDT", "15m")
+
+    if not btc:
+        return False, "BTC данные недоступны"
+
+    if btc["ema50"] <= btc["ema200"]:
+        return False, "BTC не в восходящем тренде"
+
+    if btc["ema50"] <= btc["ema50_prev"]:
+        return False, "EMA50 BTC не растет"
+
+    if btc["adx"] < risk_settings["min_adx"]:
+        return False, "BTC во флэте"
+
+    return True, "BTC рынок OK"
+
+
+def is_strong_buy(symbol, decision, signal_data):
+
+    btc_ok, btc_reason = btc_market_filter_ok()
+
+    if not btc_ok and symbol != "BTC-USDT":
+        return False, btc_reason
+
+    if decision["signal"] != "BUY":
+        return False, "Нет BUY"
+
+    if decision["avg_score"] < risk_settings["buy_score"]:
+        return False, "Слабый сигнал"
+
+    if signal_data["ema50"] <= signal_data["ema200"]:
+        return False, "Нет восходящего тренда"
+
+    if signal_data["ema50"] <= signal_data["ema50_prev"]:
+        return False, "EMA50 не растет"
+
+    if signal_data["adx"] < risk_settings["min_adx"]:
+        return False, "ADX слабый / флэт"
+
+    return True, "OK"
 # =========================
 # SYMBOL SELECTION
 # =========================
@@ -1468,10 +1488,7 @@ def close_position(
     )
 
 
-def update_trailing_stop(
-    symbol,
-    current_price
-):
+def update_trailing_stop(symbol, current_price):
 
     positions = get_open_positions()
 
@@ -1479,31 +1496,33 @@ def update_trailing_stop(
         return
 
     position = positions[symbol]
+    entry_price = position["entry_price"]
 
-    if (
-        current_price
-        > position["highest_price"]
-    ):
+    if entry_price <= 0:
+        return
 
-        position["highest_price"] = (
-            current_price
-        )
+    pnl_percent = (
+        (current_price - entry_price)
+        / entry_price
+    ) * 100
 
-        position["stop_loss_price"] = (
-            current_price
+    if current_price > position["highest_price"]:
+        position["highest_price"] = current_price
+
+    if pnl_percent >= risk_settings["trailing_start_profit_percent"]:
+
+        new_stop = (
+            position["highest_price"]
             * (
                 1
-                - risk_settings[
-                    "trailing_stop_percent"
-                ]
-                / 100
+                - risk_settings["trailing_stop_percent"] / 100
             )
         )
 
-        update_open_position(
-            symbol,
-            position
-        )
+        if new_stop > position["stop_loss_price"]:
+            position["stop_loss_price"] = new_stop
+
+    update_open_position(symbol, position)
 # =========================
 # AUTOTRADE
 # =========================
@@ -1516,7 +1535,6 @@ async def autotrade_loop(chat_id):
     while autotrade_enabled:
 
         try:
-
             sync_positions_with_okx()
             unlock_missing_positions()
 
@@ -1529,18 +1547,12 @@ async def autotrade_loop(chat_id):
             for symbol, position in positions.items():
 
                 try:
-
-                    current_price = get_current_price(
-                        symbol
-                    )
+                    current_price = get_current_price(symbol)
 
                     if current_price <= 0:
                         continue
 
-                    update_trailing_stop(
-                        symbol,
-                        current_price
-                    )
+                    update_trailing_stop(symbol, current_price)
 
                     positions = get_open_positions()
 
@@ -1550,33 +1562,23 @@ async def autotrade_loop(chat_id):
                     position = positions[symbol]
 
                     pnl_percent = (
-                        (
-                            current_price
-                            - position["entry_price"]
-                        )
+                        (current_price - position["entry_price"])
                         / position["entry_price"]
-                    ) * 100
+                    ) * 100 if position["entry_price"] > 0 else 0
 
-                    # TRAILING STOP
+                    # TRAILING STOP / INITIAL STOP
 
-                    if (
-                        current_price
-                        <= position["stop_loss_price"]
-                    ):
+                    if current_price <= position["stop_loss_price"]:
 
                         if symbol in sell_signal_locks:
                             continue
 
-                        sell_signal_locks.add(
-                            symbol
-                        )
+                        sell_signal_locks.add(symbol)
 
-                        result = (
-                            place_market_sell(
-                                symbol,
-                                position["amount_usdt"],
-                                current_price
-                            )
+                        result = place_market_sell(
+                            symbol,
+                            position["amount_usdt"],
+                            current_price
                         )
 
                         close_position(
@@ -1607,38 +1609,24 @@ async def autotrade_loop(chat_id):
                             f"PnL: {pnl_percent:.2f}%"
                         )
 
-                        sell_signal_locks.discard(
-                            symbol
-                        )
-
+                        sell_signal_locks.discard(symbol)
                         continue
 
                     # SELL SIGNAL
 
-                    decision = (
-                        multi_timeframe_decision_for_symbol(
-                            symbol
-                        )
-                    )
+                    decision = multi_timeframe_decision_for_symbol(symbol)
 
-                    if (
-                        decision["signal"]
-                        == "SELL"
-                    ):
+                    if decision["signal"] == "SELL":
 
                         if symbol in sell_signal_locks:
                             continue
 
-                        sell_signal_locks.add(
-                            symbol
-                        )
+                        sell_signal_locks.add(symbol)
 
-                        result = (
-                            place_market_sell(
-                                symbol,
-                                position["amount_usdt"],
-                                current_price
-                            )
+                        result = place_market_sell(
+                            symbol,
+                            position["amount_usdt"],
+                            current_price
                         )
 
                         close_position(
@@ -1664,17 +1652,13 @@ async def autotrade_loop(chat_id):
                             f"PnL: {pnl_percent:.2f}%"
                         )
 
-                        sell_signal_locks.discard(
-                            symbol
-                        )
+                        sell_signal_locks.discard(symbol)
 
                 except Exception as e:
-
                     await bot.send_message(
                         chat_id,
                         f"⚠️ Ошибка позиции\n\n"
-                        f"{symbol}\n\n"
-                        f"{e}"
+                        f"{symbol}\n\n{e}"
                     )
 
             # =====================
@@ -1683,79 +1667,35 @@ async def autotrade_loop(chat_id):
 
             positions = get_open_positions()
 
-            if (
-                len(positions)
-                < risk_settings[
-                    "max_open_positions"
-                ]
-            ):
+            if len(positions) < risk_settings["max_open_positions"]:
 
                 if auto_select_symbol:
-
-                    symbol, best = (
-                        choose_best_symbol()
-                    )
-
+                    symbol, best = choose_best_symbol()
                 else:
-
-                    symbol = (
-                        current_trade_symbol
-                    )
+                    symbol = current_trade_symbol
 
                 current_trade_symbol = symbol
 
-                decision = (
-                    multi_timeframe_decision_for_symbol(
-                        symbol
-                    )
-                )
-
-                signal_data = (
-                    build_signal(
-                        symbol,
-                        "15m"
-                    )
-                )
+                decision = multi_timeframe_decision_for_symbol(symbol)
+                signal_data = build_signal(symbol, "15m")
 
                 if signal_data:
 
-                    strong_buy = (
-
-                        decision["signal"]
-                        == "BUY"
-
-                        and decision["avg_score"]
-                        >= 80
-
-                        and signal_data["ema50"]
-                        >
-                        signal_data["ema200"]
-
-                        and signal_data["adx"]
-                        >= risk_settings["min_adx"]
-
+                    buy_ok, buy_reason = is_strong_buy(
+                        symbol,
+                        decision,
+                        signal_data
                     )
 
-                    if strong_buy:
+                    if buy_ok:
 
-                        allowed, reason = (
-                            can_open_new_position(
-                                symbol
-                            )
-                        )
+                        allowed, reason = can_open_new_position(symbol)
 
                         if allowed:
 
-                            amount = (
-                                get_trade_amount_usdt()
-                            )
+                            amount = get_trade_amount_usdt()
 
-                            result = (
-                                place_market_buy(
-                                    symbol,
-                                    amount
-                                )
-                            )
+                            result = place_market_buy(symbol, amount)
 
                             open_position(
                                 symbol,
@@ -1779,19 +1719,19 @@ async def autotrade_loop(chat_id):
                                 f"{symbol}\n"
                                 f"Цена: {decision['price']:.4f}\n"
                                 f"Сила сигнала: {decision['avg_score']}%\n"
-                                f"ADX: {signal_data['adx']:.2f}"
+                                f"ADX: {signal_data['adx']:.2f}\n"
+                                f"Фильтр BTC: OK"
                             )
 
-        except Exception as e:
+            save_runtime_settings()
 
+        except Exception as e:
             await bot.send_message(
                 chat_id,
                 f"❌ Ошибка автоторговли\n\n{e}"
             )
 
-        await asyncio.sleep(
-            AUTO_INTERVAL
-        )
+        await asyncio.sleep(AUTO_INTERVAL)
 # =========================
 # STATISTICS
 # =========================
