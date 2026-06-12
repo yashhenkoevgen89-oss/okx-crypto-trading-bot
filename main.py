@@ -112,9 +112,10 @@ risk_settings = {
     "max_amount_usdt": 25.0,
 
     "stop_loss_percent": 2.5,
-    "take_profit_percent": 4.0,
-    "trailing_stop_percent": 1.0,
-    "trailing_start_profit_percent": 1.0,
+    "take_profit_percent": 5.0,
+
+    "trailing_stop_percent": 0.8,
+    "trailing_start_profit_percent": 1.5,
 
     "buy_score": 85,
     "sell_score": SELL_SCORE,
@@ -1144,10 +1145,7 @@ def multi_timeframe_decision_for_symbol(symbol):
 
     for tf in TIMEFRAMES:
 
-        signal_data = build_signal(
-            symbol,
-            tf
-        )
+        signal_data = build_signal(symbol, tf)
 
         if signal_data:
             results.append(signal_data)
@@ -1159,10 +1157,7 @@ def multi_timeframe_decision_for_symbol(symbol):
             "price": 0,
         }
 
-    avg_score = (
-        sum(x["score"] for x in results)
-        / len(results)
-    )
+    avg_score = sum(x["score"] for x in results) / len(results)
 
     signal = "HOLD"
 
@@ -1195,6 +1190,9 @@ def btc_market_filter_ok():
     if btc["adx"] < risk_settings["min_adx"]:
         return False, "BTC во флэте"
 
+    if btc["signal"] == "SELL":
+        return False, "BTC показывает SELL"
+
     return True, "BTC рынок OK"
 
 
@@ -1202,7 +1200,7 @@ def is_strong_buy(symbol, decision, signal_data):
 
     btc_ok, btc_reason = btc_market_filter_ok()
 
-    if not btc_ok and symbol != "BTC-USDT":
+    if symbol != "BTC-USDT" and not btc_ok:
         return False, btc_reason
 
     if decision["signal"] != "BUY":
@@ -1232,27 +1230,19 @@ def choose_best_symbol():
     for symbol in WATCHLIST:
 
         try:
+            decision = multi_timeframe_decision_for_symbol(symbol)
+            signal_data = build_signal(symbol, "15m")
 
-            decision = (
-                multi_timeframe_decision_for_symbol(
-                    symbol
-                )
+            if not signal_data:
+                continue
+
+            buy_ok, reason = is_strong_buy(
+                symbol,
+                decision,
+                signal_data
             )
 
-            signal_data = (
-                build_signal(
-                    symbol,
-                    "15m"
-                )
-            )
-
-            if (
-                decision["signal"] == "BUY"
-                and signal_data
-                and signal_data["ema50"] > signal_data["ema200"]
-                and signal_data["adx"] >= risk_settings["min_adx"]
-            ):
-
+            if buy_ok:
                 candidates.append(
                     {
                         "symbol": symbol,
@@ -1262,10 +1252,9 @@ def choose_best_symbol():
                 )
 
         except Exception:
-            pass
+            continue
 
     if not candidates:
-
         return (
             TRADE_SYMBOL,
             {
@@ -1276,19 +1265,13 @@ def choose_best_symbol():
 
     candidates = sorted(
         candidates,
-        key=lambda x: (
-            x["score"],
-            x["adx"],
-        ),
+        key=lambda x: (x["score"], x["adx"]),
         reverse=True,
     )
 
     best = candidates[0]
 
-    return (
-        best["symbol"],
-        best,
-    )
+    return best["symbol"], best
 
 
 def get_top3_symbols():
@@ -1298,26 +1281,19 @@ def get_top3_symbols():
     for symbol in WATCHLIST:
 
         try:
+            decision = multi_timeframe_decision_for_symbol(symbol)
+            signal_data = build_signal(symbol, "15m")
 
-            decision = (
-                multi_timeframe_decision_for_symbol(
-                    symbol
-                )
-            )
+            if not signal_data:
+                continue
 
-            signal_data = (
-                build_signal(
-                    symbol,
-                    "15m"
-                )
-            )
-
-            if (
+            buy_ok, reason = is_strong_buy(
+                symbol,
+                decision,
                 signal_data
-                and signal_data["ema50"] > signal_data["ema200"]
-                and signal_data["adx"] >= risk_settings["min_adx"]
-            ):
+            )
 
+            if buy_ok:
                 candidates.append(
                     {
                         "symbol": symbol,
@@ -1327,14 +1303,11 @@ def get_top3_symbols():
                 )
 
         except Exception:
-            pass
+            continue
 
     candidates = sorted(
         candidates,
-        key=lambda x: (
-            x["score"],
-            x["adx"],
-        ),
+        key=lambda x: (x["score"], x["adx"]),
         reverse=True,
     )
 
@@ -1566,7 +1539,7 @@ async def autotrade_loop(chat_id):
                         / position["entry_price"]
                     ) * 100 if position["entry_price"] > 0 else 0
 
-                    # TRAILING STOP / INITIAL STOP
+                    # INITIAL STOP / TRAILING STOP
 
                     if current_price <= position["stop_loss_price"]:
 
@@ -1720,7 +1693,9 @@ async def autotrade_loop(chat_id):
                                 f"Цена: {decision['price']:.4f}\n"
                                 f"Сила сигнала: {decision['avg_score']}%\n"
                                 f"ADX: {signal_data['adx']:.2f}\n"
-                                f"Фильтр BTC: OK"
+                                f"BTC фильтр: OK\n"
+                                f"Trailing включится после "
+                                f"+{risk_settings['trailing_start_profit_percent']}%"
                             )
 
             save_runtime_settings()
