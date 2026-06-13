@@ -1712,8 +1712,28 @@ async def autotrade_loop(chat_id):
 # =========================
 
 def calculate_stats(period="all"):
+    conn = db_connect()
+    cur = conn.cursor()
 
-    trades = get_closed_trades(10000)
+    cur.execute(
+        """
+        SELECT
+            time,
+            date,
+            symbol,
+            entry_price,
+            exit_price,
+            amount_usdt,
+            pnl_percent,
+            pnl_usdt,
+            reason
+        FROM closed_trades
+        ORDER BY id DESC
+        """
+    )
+
+    rows = cur.fetchall()
+    conn.close()
 
     today = date.today()
     week_start = today - timedelta(days=7)
@@ -1721,23 +1741,33 @@ def calculate_stats(period="all"):
 
     filtered = []
 
-    for row in trades:
+    for row in rows:
+        trade_date_raw = row[1]
 
-        trade_date = datetime.strptime(
-            row[0],
-            "%Y-%m-%d %H:%M:%S"
-        ).date()
+        try:
+            trade_date = datetime.strptime(
+                trade_date_raw,
+                "%Y-%m-%d"
+            ).date()
+        except Exception:
+            try:
+                trade_date = datetime.strptime(
+                    row[0],
+                    "%Y-%m-%d %H:%M:%S"
+                ).date()
+            except Exception:
+                continue
 
         if period == "day":
             if trade_date != today:
                 continue
 
         elif period == "week":
-            if trade_date < week_start:
+            if trade_date < week_start or trade_date > today:
                 continue
 
         elif period == "month":
-            if trade_date < month_start:
+            if trade_date < month_start or trade_date > today:
                 continue
 
         filtered.append(row)
@@ -1746,22 +1776,22 @@ def calculate_stats(period="all"):
 
     wins = len(
         [
-            x
-            for x in filtered
-            if x[6] > 0
+            row
+            for row in filtered
+            if safe_float(row[7]) > 0
         ]
     )
 
     losses = total - wins
 
     pnl_usdt = sum(
-        x[6]
-        for x in filtered
+        safe_float(row[7])
+        for row in filtered
     )
 
     pnl_percent = sum(
-        x[5]
-        for x in filtered
+        safe_float(row[6])
+        for row in filtered
     )
 
     winrate = (
@@ -1780,76 +1810,38 @@ def calculate_stats(period="all"):
     }
 
 
-def build_period_report(
-    title,
-    period
-):
-
-    stats = calculate_stats(
-        period
-    )
+def build_period_report(title, period):
+    stats = calculate_stats(period)
 
     return (
         f"{title}\n\n"
-
-        f"Сделок: "
-        f"{stats['trades']}\n"
-
-        f"Прибыльных: "
-        f"{stats['wins']}\n"
-
-        f"Убыточных: "
-        f"{stats['losses']}\n\n"
-
-        f"WinRate: "
-        f"{stats['winrate']:.2f}%\n\n"
-
+        f"Сделок: {stats['trades']}\n"
+        f"Прибыльных: {stats['wins']}\n"
+        f"Убыточных: {stats['losses']}\n\n"
+        f"WinRate: {stats['winrate']:.2f}%\n\n"
         f"PnL:\n"
-
         f"{stats['pnl_usdt']:.4f} USDT\n"
-
         f"{stats['pnl_percent']:.2f}%"
     )
 
 
 async def show_statistics(message):
-
-    stats = calculate_stats()
-
-    text = (
-
-        "📈 Статистика\n\n"
-
-        f"Всего сделок: "
-        f"{stats['trades']}\n"
-
-        f"Прибыльных: "
-        f"{stats['wins']}\n"
-
-        f"Убыточных: "
-        f"{stats['losses']}\n\n"
-
-        f"WinRate: "
-        f"{stats['winrate']:.2f}%\n\n"
-
-        f"PnL:\n"
-
-        f"{stats['pnl_usdt']:.4f} USDT\n"
-
-        f"{stats['pnl_percent']:.2f}%"
-
-    )
+    stats = calculate_stats("all")
 
     await message.answer(
-        text,
+        f"📈 Статистика\n\n"
+        f"Всего сделок: {stats['trades']}\n"
+        f"Прибыльных: {stats['wins']}\n"
+        f"Убыточных: {stats['losses']}\n\n"
+        f"WinRate: {stats['winrate']:.2f}%\n\n"
+        f"PnL:\n"
+        f"{stats['pnl_usdt']:.4f} USDT\n"
+        f"{stats['pnl_percent']:.2f}%",
         reply_markup=keyboard
     )
 
 
-async def show_daily_report(
-    message
-):
-
+async def show_daily_report(message):
     await message.answer(
         build_period_report(
             "📅 Отчет за день",
@@ -1859,48 +1851,34 @@ async def show_daily_report(
     )
 
 
-async def show_weekly_report(
-    message
-):
-
+async def show_weekly_report(message):
     await message.answer(
         build_period_report(
-            "🗓 Отчет за неделю",
+            "🗓 Отчет за последние 7 дней",
             "week"
         ),
         reply_markup=keyboard
     )
 
 
-async def show_monthly_report(
-    message
-):
-
+async def show_monthly_report(message):
     await message.answer(
         build_period_report(
-            "📆 Отчет за месяц",
+            "📆 Отчет за текущий месяц",
             "month"
         ),
         reply_markup=keyboard
     )
 
 
-async def show_pnl(
-    message
-):
-
-    stats = calculate_stats()
+async def show_pnl(message):
+    stats = calculate_stats("all")
 
     await message.answer(
-
-        "💹 PnL\n\n"
-
+        f"💹 PnL\n\n"
         f"{stats['pnl_usdt']:.4f} USDT\n"
-
         f"{stats['pnl_percent']:.2f}%",
-
         reply_markup=keyboard
-
     )
 # =========================
 # TELEGRAM SHOW FUNCTIONS
