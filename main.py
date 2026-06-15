@@ -2387,7 +2387,7 @@ async def show_monthly_report(message):
         reply_markup=keyboard
     )
 
-# # =========================
+# =========================
 # START
 # =========================
 
