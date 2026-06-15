@@ -104,8 +104,8 @@ risk_settings = {
     "sell_score": 30,
     "min_adx": 18,
 
-    "max_open_positions": 2,
-    "max_trades_day": 5,
+    "max_open_positions": 5,
+    "max_trades_day": 15,
 
     "auto_amount_enabled": True,
     "balance_usage_percent": 5.0,
