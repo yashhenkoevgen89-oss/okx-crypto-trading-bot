@@ -117,9 +117,9 @@ risk_settings = {
     "trailing_stop_percent": 0.7,
     "trailing_start_profit_percent": 1.0,
 
-    "buy_score": 85,
-    "sell_score": SELL_SCORE,
-    "min_adx": 25,
+    "buy_score": 75,
+    "sell_score": 30,
+    "min_adx": 18,
 
     "max_open_positions": MAX_OPEN_POSITIONS,
     "max_trades_day": MAX_TRADES_DAY,
@@ -158,6 +158,22 @@ keyboard = ReplyKeyboardMarkup(
 # =========================
 # HELPERS
 # =========================
+
+def okx_order_success(result):
+    if result == "LIVE OFF":
+        return True
+
+    try:
+        if isinstance(result, dict):
+            return str(result.get("code")) == "0"
+
+        if isinstance(result, str):
+            return "'code': '0'" in result or '"code": "0"' in result
+
+    except Exception:
+        pass
+
+    return False
 
 def now():
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1554,6 +1570,18 @@ async def autotrade_loop(chat_id):
                             current_price
                         )
 
+                        if not okx_order_success(result):
+
+                            await bot.send_message(
+                                chat_id,
+                                f"❌ SELL не исполнен\n\n"
+                                f"{symbol}\n"
+                                f"Ответ OKX:\n{result}"
+                        )
+
+                        sell_signal_locks.discard(symbol)
+                        continue
+
                         close_position(
                             symbol,
                             current_price,
@@ -1601,6 +1629,18 @@ async def autotrade_loop(chat_id):
                             position["amount_usdt"],
                             current_price
                         )
+
+                        if not okx_order_success(result):
+
+                            await bot.send_message(
+                                chat_id,
+                                f"❌ SELL не исполнен\n\n"
+                                f"{symbol}\n"
+                                f"Ответ OKX:\n{result}"
+                        )
+
+                        sell_signal_locks.discard(symbol)
+                        continue
 
                         close_position(
                             symbol,
@@ -1668,13 +1708,32 @@ async def autotrade_loop(chat_id):
 
                             amount = get_trade_amount_usdt()
 
-                            result = place_market_buy(symbol, amount)
+result = place_market_buy(symbol, amount)
 
-                            open_position(
-                                symbol,
-                                decision["price"],
-                                amount
-                            )
+if not okx_order_success(result):
+
+    add_history(
+        "AUTO BUY FAILED",
+        symbol,
+        decision["price"],
+        decision["avg_score"],
+        result
+    )
+
+    await bot.send_message(
+        chat_id,
+        f"❌ BUY не исполнен\n\n"
+        f"{symbol}\n"
+        f"Ответ OKX:\n{result}"
+    )
+
+    continue
+
+open_position(
+    symbol,
+    decision["price"],
+    amount
+)
 
                             sync_positions_with_okx()
 
