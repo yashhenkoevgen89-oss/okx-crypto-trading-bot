@@ -866,10 +866,7 @@ def close_position(
     delete_open_position(symbol)
 
 
-def update_trailing_stop(
-    symbol,
-    current_price
-):
+def update_trailing_stop(symbol, current_price):
 
     positions = get_open_positions()
 
@@ -891,10 +888,7 @@ def update_trailing_stop(
     if current_price > position["highest_price"]:
         position["highest_price"] = current_price
 
-    if (
-        pnl_percent
-        >= risk_settings["trailing_start_profit_percent"]
-    ):
+    if pnl_percent >= risk_settings["trailing_start_profit_percent"]:
 
         new_stop = (
             position["highest_price"]
@@ -918,31 +912,21 @@ def update_trailing_stop(
 def okx_order_success(result):
 
     if result == "LIVE OFF":
-        return True
+        return False
 
     try:
-
         if isinstance(result, dict):
-
-            return (
-                str(
-                    result.get(
-                        "code"
-                    )
-                )
-                == "0"
-            )
+            return str(result.get("code")) == "0"
 
         if isinstance(result, str):
-
             return (
-                "'code': '0'" in result
-                or
-                '"code": "0"' in result
+                '"code":"0"' in result
+                or '"code": "0"' in result
+                or "'code': '0'" in result
             )
 
     except Exception:
-        pass
+        return False
 
     return False
 # =========================
