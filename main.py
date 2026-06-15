@@ -2387,7 +2387,7 @@ async def show_monthly_report(message):
         reply_markup=keyboard
     )
 
-# =========================
+# # =========================
 # START
 # =========================
 
@@ -2410,96 +2410,72 @@ async def text_router(message: types.Message):
     global autotrade_enabled
     global auto_select_symbol
 
-    text = (
-        message.text.lower().strip()
-        if message.text
-        else ""
-    )
+    text = message.text or ""
 
-    if "статус" in text and "авто" not in text:
-
+    if "📊" in text or "статус" in text.lower() and "авто" not in text.lower():
         await show_status(message)
 
-    elif "баланс" in text:
-
+    elif "💰" in text or "баланс" in text.lower():
         await show_balance(message)
 
-    elif "сигнал" in text:
-
+    elif "📡" in text or "сигнал" in text.lower():
         await show_signal(message)
 
-    elif "рынок" in text:
-
+    elif "🌐" in text or "рынок" in text.lower():
         await show_market(message)
 
-    elif "сканер" in text:
-
+    elif "🔎" in text or "сканер" in text.lower():
         await show_scanner(message)
 
-    elif "лучшая" in text:
-
+    elif "🏆" in text or "лучшая" in text.lower():
         await show_best_symbol(message)
 
-    elif "топ" in text:
-
+    elif "🥇" in text or "топ" in text.lower():
         await show_top3(message)
 
-    elif "позиц" in text:
-
+    elif "📋" in text or "позиц" in text.lower():
         await show_positions(message)
 
-    elif "история" in text:
-
+    elif "📜" in text or "история" in text.lower():
         await show_history(message)
 
-    elif "авто статус" in text:
-
+    elif "🤖" in text or "авто статус" in text.lower():
         await show_auto_status(message)
 
-    elif "текущ" in text:
-
+    elif "💱" in text or "текущ" in text.lower():
         await show_current_symbol(message)
 
-    elif "риск" in text:
-
+    elif "🛡" in text or "риск" in text.lower():
         await show_risk(message)
 
-    elif "статист" in text:
-
+    elif "📈" in text or "статист" in text.lower():
         await show_statistics(message)
 
-    elif "pnl" in text:
-
+    elif "💹" in text or "pnl" in text.lower():
         await show_pnl(message)
 
-    elif "днев" in text:
-
+    elif "📅" in text or "днев" in text.lower():
         await show_daily_report(message)
 
-    elif "недель" in text:
-
+    elif "🗓" in text or "недель" in text.lower():
         await show_weekly_report(message)
 
-    elif "месяч" in text or "месяц" in text:
-
+    elif "📆" in text or "месяч" in text.lower() or "месяц" in text.lower():
         await show_monthly_report(message)
 
-    elif "авто монета" in text:
+    elif "🧠" in text or "авто монета" in text.lower():
 
         auto_select_symbol = not auto_select_symbol
 
         save_runtime_settings()
 
         await message.answer(
-
             f"🧠 Авто монета\n\n"
-
             f"{'✅ ВКЛ' if auto_select_symbol else '❌ ВЫКЛ'}",
-
             reply_markup=keyboard
         )
 
-    elif "авто вкл" in text:
+    elif "🟢" in text or "авто вкл" in text.lower():
 
         if not autotrade_enabled:
 
@@ -2508,9 +2484,7 @@ async def text_router(message: types.Message):
             save_runtime_settings()
 
             asyncio.create_task(
-                autotrade_loop(
-                    message.chat.id
-                )
+                autotrade_loop(message.chat.id)
             )
 
         await message.answer(
@@ -2518,7 +2492,7 @@ async def text_router(message: types.Message):
             reply_markup=keyboard
         )
 
-    elif "авто выкл" in text:
+    elif "🔴" in text or "авто выкл" in text.lower():
 
         autotrade_enabled = False
 
@@ -2529,7 +2503,7 @@ async def text_router(message: types.Message):
             reply_markup=keyboard
         )
 
-    elif "синх" in text:
+    elif "🔄" in text or "синх" in text.lower():
 
         sync_positions_with_okx()
 
@@ -2538,7 +2512,7 @@ async def text_router(message: types.Message):
             reply_markup=keyboard
         )
 
-    elif "сброс" in text:
+    elif "♻️" in text or "сброс" in text.lower():
 
         clear_open_positions()
 
