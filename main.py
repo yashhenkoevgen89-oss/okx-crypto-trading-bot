@@ -1708,32 +1708,32 @@ async def autotrade_loop(chat_id):
 
                             amount = get_trade_amount_usdt()
 
-result = place_market_buy(symbol, amount)
+                            result = place_market_buy(symbol, amount)
 
-if not okx_order_success(result):
+                            if not okx_order_success(result):
 
-    add_history(
-        "AUTO BUY FAILED",
-        symbol,
-        decision["price"],
-        decision["avg_score"],
-        result
-    )
+                                add_history(
+                                    "AUTO BUY FAILED",
+                                    symbol,
+                                    decision["price"],
+                                    decision["avg_score"],
+                                    result
+                                )
 
-    await bot.send_message(
-        chat_id,
-        f"❌ BUY не исполнен\n\n"
-        f"{symbol}\n"
-        f"Ответ OKX:\n{result}"
-    )
+                                await bot.send_message(
+                                    chat_id,
+                                    f"❌ BUY не исполнен\n\n"
+                                    f"{symbol}\n"
+                                    f"Ответ OKX:\n{result}"
+                                )
 
-    continue
+                                continue
 
-open_position(
-    symbol,
-    decision["price"],
-    amount
-)
+                            open_position(
+                                symbol,
+                                decision["price"],
+                                amount
+                            )
 
                             sync_positions_with_okx()
 
