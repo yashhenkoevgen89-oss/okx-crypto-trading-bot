@@ -100,9 +100,9 @@ risk_settings = {
     "trailing_stop_percent": 0.35,
     "trailing_start_profit_percent": 0.45,
 
-    "buy_score": 75,
-    "sell_score": 30,
-    "min_adx": 18,
+    "buy_score":85,
+    "sell_score": 25,
+    "min_adx": 22,
 
     "max_open_positions": 5,
     "max_trades_day": 15,
