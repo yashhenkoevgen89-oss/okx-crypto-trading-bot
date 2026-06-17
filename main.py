@@ -2457,25 +2457,25 @@ async def main():
     sync_positions_with_okx()
 
     print(
-    "OKX ULTRA PRO MAX V7.1 STARTED"
-)
-
-if autotrade_enabled:
-
-    chat_id = db_get(
-        "last_chat_id",
-        None
+        "OKX ULTRA PRO MAX V7.1 STARTED"
     )
 
-    if chat_id:
+    if autotrade_enabled:
 
-        asyncio.create_task(
-            autotrade_loop(chat_id)
+        chat_id = db_get(
+            "last_chat_id",
+            None
         )
 
-await dp.start_polling(
-    bot
-)
+        if chat_id:
+
+            asyncio.create_task(
+                autotrade_loop(chat_id)
+            )
+
+    await dp.start_polling(
+        bot
+    )
 
 
 if __name__ == "__main__":
