@@ -110,15 +110,15 @@ risk_settings = {
     "amount_usdt": TRADE_AMOUNT_USDT,
     "max_amount_usdt": 25.0,
 
-    "stop_loss_percent": 0.6,
-    "take_profit_percent": 1.2,
+    "stop_loss_percent": 0.5,
+    "take_profit_percent": 1.5,
 
-    "trailing_stop_percent": 0.35,
-    "trailing_start_profit_percent": 0.45,
+    "trailing_stop_percent": 0.4,
+    "trailing_start_profit_percent": 0.6,
 
-    "buy_score":85,
-    "sell_score": 25,
-    "min_adx": 22,
+    "buy_score":80,
+    "sell_score": 30,
+    "min_adx": 20,
 
     "max_open_positions": 5,
     "max_trades_day": 15,
