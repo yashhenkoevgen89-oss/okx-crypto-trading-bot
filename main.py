@@ -42,7 +42,23 @@ WATCHLIST = [
     "BTC-USDT",
     "ETH-USDT",
     "SOL-USDT",
+    "XRP-USDT",
+    "DOGE-USDT",
     "TON-USDT",
+    "ADA-USDT",
+    "AVAX-USDT",
+    "LINK-USDT",
+    "SUI-USDT",
+    "DOT-USDT",
+    "APT-USDT",
+    "NEAR-USDT",
+    "LTC-USDT",
+    "BCH-USDT",
+    "TRX-USDT",
+    "ATOM-USDT",
+    "OP-USDT",
+    "FIL-USDT",
+    "ETC-USDT",
 ]
 
 
@@ -302,7 +318,12 @@ def load_runtime_settings():
     global current_trade_symbol
     global risk_settings
 
-    autotrade_enabled = False
+    autotrade_enabled = bool(
+    db_get(
+        "autotrade_enabled",
+        False
+    )
+)
     auto_select_symbol = bool(db_get("auto_select_symbol", True))
     current_trade_symbol = db_get("current_trade_symbol", TRADE_SYMBOL)
 
@@ -1564,6 +1585,10 @@ async def show_balance(message):
     )
 async def show_signal(message):
 
+    decision = multi_timeframe_decision_for_symbol(
+        current_trade_symbol
+    )
+
     signal = build_signal(
         current_trade_symbol,
         "15m"
@@ -1582,17 +1607,21 @@ async def show_signal(message):
 
         f"📡 Сигнал\n\n"
 
-        f"{signal['symbol']}\n"
+        f"{current_trade_symbol}\n"
 
-        f"Цена: {signal['price']:.4f}\n"
+        f"Цена: {decision['price']:.4f}\n"
 
-        f"Решение: {signal['signal']}\n"
+        f"Решение: {decision['signal']}\n"
 
-        f"Сила: {signal['score']}%\n\n"
+        f"Сила: {decision['avg_score']}%\n\n"
 
         f"RSI: {signal['rsi']:.2f}\n"
 
-        f"ADX: {signal['adx']:.2f}",
+        f"ADX: {signal['adx']:.2f}\n"
+
+        f"EMA50: {signal['ema50']:.4f}\n"
+
+        f"EMA200: {signal['ema200']:.4f}",
 
         reply_markup=keyboard
     )
@@ -2289,6 +2318,10 @@ async def text_router(message: types.Message):
     global auto_select_symbol
 
     text = message.text or ""
+    db_set(
+        "last_chat_id",
+        message.chat.id
+    )
 
     if "📊" in text or "статус" in text.lower() and "авто" not in text.lower():
         await show_status(message)
@@ -2423,15 +2456,26 @@ async def main():
 
     sync_positions_with_okx()
 
-    autotrade_enabled = False
-
     print(
-        "OKX ULTRA PRO MAX V7.1 STARTED"
+    "OKX ULTRA PRO MAX V7.1 STARTED"
+)
+
+if autotrade_enabled:
+
+    chat_id = db_get(
+        "last_chat_id",
+        None
     )
 
-    await dp.start_polling(
-        bot
-    )
+    if chat_id:
+
+        asyncio.create_task(
+            autotrade_loop(chat_id)
+        )
+
+await dp.start_polling(
+    bot
+)
 
 
 if __name__ == "__main__":
