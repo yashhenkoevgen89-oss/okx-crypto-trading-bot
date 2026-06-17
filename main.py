@@ -169,22 +169,7 @@ def currency_to_symbol(currency):
     return f"{currency}-USDT"
 
 
-def okx_order_success(result):
 
-    if result == "LIVE OFF":
-        return True
-
-    try:
-        if isinstance(result, dict):
-            return str(result.get("code")) == "0"
-
-        if isinstance(result, str):
-            return "'code': '0'" in result or '"code": "0"' in result
-
-    except Exception:
-        pass
-
-    return False
 # =========================
 # DATABASE
 # =========================
