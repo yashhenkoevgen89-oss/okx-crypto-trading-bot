@@ -1245,18 +1245,17 @@ def choose_best_symbol():
             if not signal_data:
                 continue
 
-            buy_ok, reason = is_strong_buy(symbol, decision, signal_data)
+            candidates.append(
+                {
+                    "symbol": symbol,
+                    "score": decision["avg_score"],
+                    "adx": signal_data["adx"],
+                    "signal": decision["signal"],
+                }
+            )
 
-            if buy_ok:
-                candidates.append(
-                    {
-                        "symbol": symbol,
-                        "score": decision["avg_score"],
-                        "adx": signal_data["adx"],
-                    }
-                )
-
-        except Exception:
+        except Exception as e:
+            print(f"choose_best_symbol error {symbol}: {e}")
             continue
 
     if not candidates:
@@ -1265,6 +1264,7 @@ def choose_best_symbol():
             {
                 "score": 0,
                 "adx": 0,
+                "signal": "HOLD",
             },
         )
 
@@ -1290,18 +1290,17 @@ def get_top3_symbols():
             if not signal_data:
                 continue
 
-            buy_ok, reason = is_strong_buy(symbol, decision, signal_data)
+            candidates.append(
+                {
+                    "symbol": symbol,
+                    "score": decision["avg_score"],
+                    "adx": signal_data["adx"],
+                    "signal": decision["signal"],
+                }
+            )
 
-            if buy_ok:
-                candidates.append(
-                    {
-                        "symbol": symbol,
-                        "score": decision["avg_score"],
-                        "adx": signal_data["adx"],
-                    }
-                )
-
-        except Exception:
+        except Exception as e:
+            print(f"get_top3_symbols error {symbol}: {e}")
             continue
 
     candidates = sorted(
@@ -1992,51 +1991,32 @@ async def show_market(message):
 async def show_scanner(message):
 
     text = "🔎 Сканер\n\n"
-
     found = 0
 
     for symbol in WATCHLIST:
 
         try:
-
-            decision = multi_timeframe_decision_for_symbol(
-                symbol
-            )
-
-            signal = build_signal(
-                symbol,
-                "15m"
-            )
+            decision = multi_timeframe_decision_for_symbol(symbol)
+            signal = build_signal(symbol, "15m")
 
             if not signal:
                 continue
 
-            if (
-                signal["ema50"] > signal["ema200"]
-                and
-                signal["adx"] >= risk_settings["min_adx"]
-            ):
+            found += 1
 
-                found += 1
+            text += (
+                f"{symbol}\n"
+                f"Итог: {decision['signal']}\n"
+                f"Сила: {decision['avg_score']}%\n"
+                f"ADX: {signal['adx']:.2f}\n\n"
+            )
 
-                text += (
-
-                    f"{symbol}\n"
-
-                    f"{decision['signal']}\n"
-
-                    f"Сила: {decision['avg_score']}%\n"
-
-                    f"ADX: {signal['adx']:.2f}\n\n"
-
-                )
-
-        except Exception:
+        except Exception as e:
+            print(f"scanner error {symbol}: {e}")
             continue
 
     if found == 0:
-
-        text += "Подходящих монет сейчас нет."
+        text += "Нет данных по монетам."
 
     await message.answer(
         text,
