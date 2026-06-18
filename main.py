@@ -1874,6 +1874,14 @@ async def autotrade_loop(chat_id):
                         signal_data
                     )
 
+                    if not buy_ok:
+                        await bot.send_message(
+                            chat_id,
+                            f"❌ Вход запрещен\n\n"
+                            f"{symbol}\n"
+                            f"Причина:\n{buy_reason}"
+                    )
+
                     if buy_ok:
 
                         allowed, reason = can_open_new_position(
