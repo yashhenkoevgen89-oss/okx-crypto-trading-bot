@@ -1851,12 +1851,20 @@ async def autotrade_loop(chat_id):
                     )
 
                     if not buy_ok:
-                        await bot.send_message(
-                            chat_id,
-                            f"❌ Вход запрещен\n\n"
-                            f"{symbol}\n"
-                            f"Причина:\n{buy_reason}"
-                    )
+
+    key = f"{symbol}_buy_block"
+
+    if blocked_reasons.get(key) != buy_reason:
+
+        blocked_reasons[key] = buy_reason
+
+        await bot.send_message(
+            chat_id,
+            f"❌ Вход запрещен\n\n"
+            f"{symbol}\n"
+            f"Причина:\n"
+            f"{buy_reason}"
+        )
 
                     if buy_ok:
 
