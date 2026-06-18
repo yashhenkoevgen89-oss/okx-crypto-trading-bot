@@ -1192,18 +1192,13 @@ def multi_timeframe_decision_for_symbol(symbol):
 
 
 def btc_market_filter_ok():
+
     btc = build_signal("BTC-USDT", "15m")
 
     if not btc:
-        return False, "BTC данные недоступны"
+        return True, "BTC данные недоступны"
 
-    if btc["ema50"] <= btc["ema200"]:
-        return False, "BTC не в восходящем тренде"
-
-    if btc["ema50"] <= btc["ema50_prev"]:
-        return False, "EMA50 BTC не растет"
-
-    if btc["adx"] < risk_settings["min_adx"]:
+    if btc["adx"] < 18:
         return False, "BTC во флэте"
 
     if btc["signal"] == "SELL":
