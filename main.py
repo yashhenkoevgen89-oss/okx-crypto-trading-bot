@@ -1196,15 +1196,17 @@ def btc_market_filter_ok():
     btc = build_signal("BTC-USDT", "15m")
 
     if not btc:
-        return True, "BTC данные недоступны"
+        return True, "OK"
 
-    if btc["adx"] < 18:
-        return False, "BTC во флэте"
+    # блокируем только сильное падение BTC
+    if (
+        btc["signal"] == "SELL"
+        and btc["score"] <= 20
+        and btc["adx"] >= 25
+    ):
+        return False, "BTC сильный SELL"
 
-    if btc["signal"] == "SELL":
-        return False, "BTC показывает SELL"
-
-    return True, "BTC рынок OK"
+    return True, "OK"
 
 
 def is_strong_buy(symbol, decision, signal_data):
