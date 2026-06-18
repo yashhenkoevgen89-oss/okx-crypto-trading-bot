@@ -39,26 +39,12 @@ DUST_LIMIT_USDT = float(os.getenv("DUST_LIMIT_USDT", "5"))
 
 
 WATCHLIST = [
-    "BTC-USDT",
-    "ETH-USDT",
-    "SOL-USDT",
-    "XRP-USDT",
-    "DOGE-USDT",
-    "TON-USDT",
-    "ADA-USDT",
-    "AVAX-USDT",
-    "LINK-USDT",
-    "SUI-USDT",
-    "DOT-USDT",
-    "APT-USDT",
-    "NEAR-USDT",
-    "LTC-USDT",
-    "BCH-USDT",
-    "TRX-USDT",
-    "ATOM-USDT",
-    "OP-USDT",
-    "FIL-USDT",
-    "ETC-USDT",
+    "BTC-USDT", "ETH-USDT", "SOL-USDT", "XRP-USDT", "DOGE-USDT",
+    "TON-USDT", "ADA-USDT", "AVAX-USDT", "LINK-USDT", "SUI-USDT",
+    "DOT-USDT", "APT-USDT", "NEAR-USDT", "LTC-USDT", "BCH-USDT",
+    "TRX-USDT", "ATOM-USDT", "OP-USDT", "FIL-USDT", "ETC-USDT",
+    "ARB-USDT", "INJ-USDT", "SEI-USDT", "HBAR-USDT", "UNI-USDT",
+    "PEPE-USDT", "WIF-USDT", "FET-USDT", "GALA-USDT", "MATIC-USDT",
 ]
 
 
@@ -104,6 +90,7 @@ auto_select_symbol = True
 current_trade_symbol = TRADE_SYMBOL
 
 sell_signal_locks = set()
+blocked_reasons = {}
 
 
 risk_settings = {
@@ -1196,9 +1183,8 @@ def btc_market_filter_ok():
     btc = build_signal("BTC-USDT", "15m")
 
     if not btc:
-        return True, "OK"
+        return True, "BTC данные недоступны"
 
-    # блокируем только сильное падение BTC
     if (
         btc["signal"] == "SELL"
         and btc["score"] <= 20
@@ -1206,10 +1192,11 @@ def btc_market_filter_ok():
     ):
         return False, "BTC сильный SELL"
 
-    return True, "OK"
+    return True, "BTC рынок OK"
 
 
 def is_strong_buy(symbol, decision, signal_data):
+
     btc_ok, btc_reason = btc_market_filter_ok()
 
     if symbol != "BTC-USDT" and not btc_ok:
@@ -1219,16 +1206,16 @@ def is_strong_buy(symbol, decision, signal_data):
         return False, "Нет BUY"
 
     if decision["avg_score"] < risk_settings["buy_score"]:
-        return False, "Слабый сигнал"
+        return False, f"Слабый сигнал {decision['avg_score']}%"
 
     if signal_data["ema50"] <= signal_data["ema200"]:
-        return False, "Нет восходящего тренда"
+        return False, "EMA50 ниже EMA200"
 
     if signal_data["ema50"] <= signal_data["ema50_prev"]:
         return False, "EMA50 не растет"
 
     if signal_data["adx"] < risk_settings["min_adx"]:
-        return False, "ADX слабый / флэт"
+        return False, f"ADX слабый {signal_data['adx']:.2f}"
 
     return True, "OK"
 
@@ -1603,21 +1590,13 @@ async def show_signal(message):
     await message.answer(
 
         f"📡 Сигнал\n\n"
-
-        f"{current_trade_symbol}\n"
-
+        f"{current_trade_symbol}\n\n"
         f"Цена: {decision['price']:.4f}\n"
-
         f"Решение: {decision['signal']}\n"
-
         f"Сила: {decision['avg_score']}%\n\n"
-
         f"RSI: {signal['rsi']:.2f}\n"
-
         f"ADX: {signal['adx']:.2f}\n"
-
         f"EMA50: {signal['ema50']:.4f}\n"
-
         f"EMA200: {signal['ema200']:.4f}",
 
         reply_markup=keyboard
@@ -2461,10 +2440,6 @@ async def main():
 
     sync_positions_with_okx()
 
-    print(
-        "OKX ULTRA PRO MAX V7.1 STARTED"
-    )
-
     if autotrade_enabled:
 
         chat_id = db_get(
@@ -2478,9 +2453,11 @@ async def main():
                 autotrade_loop(chat_id)
             )
 
-    await dp.start_polling(
-        bot
+    print(
+        "OKX ULTRA PRO MAX V7.2 STARTED"
     )
+
+    await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
