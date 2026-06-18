@@ -97,15 +97,15 @@ risk_settings = {
     "amount_usdt": TRADE_AMOUNT_USDT,
     "max_amount_usdt": 25.0,
 
-    "stop_loss_percent": 0.5,
-    "take_profit_percent": 1.5,
+    "stop_loss_percent": 0.6,
+    "take_profit_percent": 1.2,
 
-    "trailing_stop_percent": 0.4,
-    "trailing_start_profit_percent": 0.6,
+    "trailing_stop_percent": 0.35,
+    "trailing_start_profit_percent": 0.45,
 
-    "buy_score":80,
-    "sell_score": 30,
-    "min_adx": 20,
+    "buy_score": 75,
+    "sell_score": 35,
+    "min_adx": 18,
 
     "max_open_positions": 5,
     "max_trades_day": 15,
@@ -1180,42 +1180,19 @@ def multi_timeframe_decision_for_symbol(symbol):
 
 def btc_market_filter_ok():
 
-    btc = build_signal("BTC-USDT", "15m")
-
-    if not btc:
-        return True, "BTC данные недоступны"
-
-    if (
-        btc["signal"] == "SELL"
-        and btc["score"] <= 20
-        and btc["adx"] >= 25
-    ):
-        return False, "BTC сильный SELL"
-
-    return True, "BTC рынок OK"
+    return True, "OK"
 
 
 def is_strong_buy(symbol, decision, signal_data):
-
-    btc_ok, btc_reason = btc_market_filter_ok()
-
-    if symbol != "BTC-USDT" and not btc_ok:
-        return False, btc_reason
 
     if decision["signal"] != "BUY":
         return False, "Нет BUY"
 
     if decision["avg_score"] < risk_settings["buy_score"]:
-        return False, f"Слабый сигнал {decision['avg_score']}%"
-
-    if signal_data["ema50"] <= signal_data["ema200"]:
-        return False, "EMA50 ниже EMA200"
-
-    if signal_data["ema50"] <= signal_data["ema50_prev"]:
-        return False, "EMA50 не растет"
+        return False, "Слабый сигнал"
 
     if signal_data["adx"] < risk_settings["min_adx"]:
-        return False, f"ADX слабый {signal_data['adx']:.2f}"
+        return False, "ADX слабый / флэт"
 
     return True, "OK"
 
@@ -1591,11 +1568,16 @@ async def show_signal(message):
 
         f"📡 Сигнал\n\n"
         f"{current_trade_symbol}\n\n"
+
         f"Цена: {decision['price']:.4f}\n"
+
         f"Решение: {decision['signal']}\n"
+
         f"Сила: {decision['avg_score']}%\n\n"
+
         f"RSI: {signal['rsi']:.2f}\n"
         f"ADX: {signal['adx']:.2f}\n"
+
         f"EMA50: {signal['ema50']:.4f}\n"
         f"EMA200: {signal['ema200']:.4f}",
 
@@ -1668,14 +1650,9 @@ async def autotrade_loop(chat_id):
         try:
 
             sync_positions_with_okx()
-
             unlock_missing_positions()
 
             positions = get_open_positions()
-
-            # =====================
-            # CHECK OPEN POSITIONS
-            # =====================
 
             for symbol, position in positions.items():
 
@@ -1705,10 +1682,6 @@ async def autotrade_loop(chat_id):
                         )
                         / position["entry_price"]
                     ) * 100 if position["entry_price"] > 0 else 0
-
-                    # =====================
-                    # TRAILING STOP
-                    # =====================
 
                     if current_price <= position["stop_loss_price"]:
 
@@ -1754,18 +1727,9 @@ async def autotrade_loop(chat_id):
                             )
 
                         sell_signal_locks.discard(symbol)
-
                         continue
 
-                    # =====================
-                    # SELL SIGNAL
-                    # =====================
-
-                    decision = (
-                        multi_timeframe_decision_for_symbol(
-                            symbol
-                        )
-                    )
+                    decision = multi_timeframe_decision_for_symbol(symbol)
 
                     if decision["signal"] == "SELL":
 
@@ -1815,27 +1779,18 @@ async def autotrade_loop(chat_id):
                         f"{symbol}\n\n{e}"
                     )
 
-            # =====================
-            # OPEN NEW POSITION
-            # =====================
-
             positions = get_open_positions()
 
             if len(positions) < risk_settings["max_open_positions"]:
 
                 if auto_select_symbol:
-
                     symbol, best = choose_best_symbol()
-
                 else:
-
                     symbol = current_trade_symbol
 
                 current_trade_symbol = symbol
 
-                decision = multi_timeframe_decision_for_symbol(
-                    symbol
-                )
+                decision = multi_timeframe_decision_for_symbol(symbol)
 
                 signal_data = build_signal(
                     symbol,
@@ -1851,78 +1806,58 @@ async def autotrade_loop(chat_id):
                     )
 
                     if not buy_ok:
+                        continue
 
-                        key = f"{symbol}_buy_block"
+                    allowed, reason = can_open_new_position(symbol)
 
-                        if blocked_reasons.get(key) != buy_reason:
+                    if not allowed:
+                        continue
 
-                            blocked_reasons[key] = buy_reason
+                    amount = get_trade_amount_usdt()
 
-                            await bot.send_message(
-                                chat_id,
-                                f"❌ Вход запрещен\n\n"
-                                f"{symbol}\n"
-                                f"Причина:\n{buy_reason}"
-                            )
+                    result = place_market_buy(
+                        symbol,
+                        amount
+                    )
 
-                    if buy_ok:
+                    if okx_order_success(result):
 
-                        allowed, reason = can_open_new_position(
-                            symbol
+                        open_position(
+                            symbol,
+                            decision["price"],
+                            amount
                         )
 
-                        if allowed:
+                        sync_positions_with_okx()
 
-                            amount = get_trade_amount_usdt()
+                        add_history(
+                            "AUTO BUY",
+                            symbol,
+                            decision["price"],
+                            decision["avg_score"],
+                            result
+                        )
 
-                            result = place_market_buy(
-                                symbol,
-                                amount
-                            )
+                        await bot.send_message(
+                            chat_id,
+                            f"🟢 AUTO BUY\n\n"
+                            f"{symbol}\n"
+                            f"Цена: {decision['price']:.4f}\n"
+                            f"Сила сигнала: {decision['avg_score']}%\n"
+                            f"ADX: {signal_data['adx']:.2f}\n"
+                            f"Сумма: {amount:.2f} USDT\n"
+                            f"Trailing включится после "
+                            f"+{risk_settings['trailing_start_profit_percent']}%"
+                        )
 
-                            # =====================
-                            # BUY SUCCESS
-                            # =====================
+                    else:
 
-                            if okx_order_success(result):
-
-                                open_position(
-                                    symbol,
-                                    decision["price"],
-                                    amount
-                                )
-
-                                sync_positions_with_okx()
-
-                                add_history(
-                                    "AUTO BUY",
-                                    symbol,
-                                    decision["price"],
-                                    decision["avg_score"],
-                                    result
-                                )
-
-                                await bot.send_message(
-                                    chat_id,
-                                    f"🟢 AUTO BUY\n\n"
-                                    f"{symbol}\n"
-                                    f"Цена: {decision['price']:.4f}\n"
-                                    f"Сила сигнала: {decision['avg_score']}%\n"
-                                    f"ADX: {signal_data['adx']:.2f}\n"
-                                    f"BTC фильтр: OK\n"
-                                    f"Сумма: {amount:.2f} USDT\n"
-                                    f"Trailing включится после "
-                                    f"+{risk_settings['trailing_start_profit_percent']}%"
-                                )
-
-                            else:
-
-                                await bot.send_message(
-                                    chat_id,
-                                    f"⚠️ BUY отклонён\n\n"
-                                    f"{symbol}\n\n"
-                                    f"{result}"
-                                )
+                        await bot.send_message(
+                            chat_id,
+                            f"⚠️ BUY отклонён\n\n"
+                            f"{symbol}\n\n"
+                            f"{result}"
+                        )
 
             save_runtime_settings()
 
@@ -1933,9 +1868,7 @@ async def autotrade_loop(chat_id):
                 f"❌ Ошибка автоторговли\n\n{e}"
             )
 
-        await asyncio.sleep(
-            AUTO_INTERVAL
-        )
+        await asyncio.sleep(AUTO_INTERVAL)
 
 # =========================
 # TELEGRAM EXTRA FUNCTIONS
