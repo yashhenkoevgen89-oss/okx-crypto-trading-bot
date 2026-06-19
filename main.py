@@ -628,11 +628,9 @@ def get_open_positions():
 def get_okx_balance():
 
     try:
-
         data = account_api.get_account_balance()
 
         if not data or "data" not in data:
-
             return []
 
         details = data["data"][0]["details"]
@@ -642,30 +640,17 @@ def get_okx_balance():
         for item in details:
 
             balances.append(
-
                 {
                     "ccy": item["ccy"],
-
-                    "eq_usd": safe_float(
-                        item.get(
-                            "eqUsd",
-                            0
-                        )
-                    ),
-
-                    "avail_bal": safe_float(
-                        item.get(
-                            "availBal",
-                            0
-                        )
-                    )
+                    "eq_usd": safe_float(item.get("eqUsd", 0)),
+                    "avail_bal": safe_float(item.get("availBal", 0)),
                 }
             )
 
         return balances
 
-    except Exception:
-
+    except Exception as e:
+        print(f"get_okx_balance error: {e}")
         return []
 
 
@@ -676,7 +661,6 @@ def get_usdt_balance():
     for item in balances:
 
         if item["ccy"] == "USDT":
-
             return item["avail_bal"]
 
     return 0.0
@@ -686,23 +670,37 @@ def get_total_balance_usdt():
 
     balances = get_okx_balance()
 
-    total = 0
+    total = 0.0
 
     for item in balances:
-
-        total += safe_float(
-            item["eq_usd"]
-        )
+        total += safe_float(item.get("eq_usd", 0))
 
     return total
 
 
-def get_current_price(
-    symbol
-):
+def get_usdt_rub_rate():
 
     try:
+        response = requests.get(
+            "https://open.er-api.com/v6/latest/USD",
+            timeout=10
+        )
 
+        data = response.json()
+
+        return safe_float(
+            data.get("rates", {}).get("RUB", 90),
+            90
+        )
+
+    except Exception as e:
+        print(f"get_usdt_rub_rate error: {e}")
+        return 90.0
+
+
+def get_current_price(symbol):
+
+    try:
         ticker = market_api.get_ticker(
             instId=symbol
         )
@@ -711,9 +709,56 @@ def get_current_price(
             ticker["data"][0]["last"]
         )
 
-    except Exception:
-
+    except Exception as e:
+        print(f"get_current_price error {symbol}: {e}")
         return 0.0
+
+
+def get_okx_fills(limit=100):
+
+    try:
+        result = trade_api.get_fills(
+            limit=str(limit)
+        )
+
+        if not result or "data" not in result:
+            return []
+
+        return result["data"]
+
+    except Exception as e:
+        print(f"get_okx_fills error: {e}")
+        return []
+
+
+def get_okx_trade_statistics(limit=100):
+
+    fills = get_okx_fills(limit)
+
+    trades = []
+
+    for item in fills:
+
+        symbol = item.get("instId", "")
+        side = item.get("side", "")
+        price = safe_float(item.get("fillPx", 0))
+        size = safe_float(item.get("fillSz", 0))
+        fee = safe_float(item.get("fee", 0))
+
+        amount_usdt = price * size
+
+        trades.append(
+            {
+                "symbol": symbol,
+                "side": side,
+                "price": price,
+                "size": size,
+                "amount_usdt": amount_usdt,
+                "fee": fee,
+            }
+        )
+
+    return trades
 
 # =========================
 # TRADE FUNCTIONS
@@ -1553,16 +1598,41 @@ async def show_status(message):
     )
 async def show_balance(message):
 
-    total = get_total_balance_usdt()
+    balances = get_okx_balance()
+    rub_rate = get_usdt_rub_rate()
+
+    total_usdt = 0.0
+    assets_text = ""
+
+    for item in balances:
+
+        if item["eq_usd"] < 0.01:
+            continue
+
+        total_usdt += item["eq_usd"]
+
+        rub_value = item["eq_usd"] * rub_rate
+
+        assets_text += (
+            f"{item['ccy']}\n"
+            f"Доступно: {item['avail_bal']:.8f}\n"
+            f"≈ {item['eq_usd']:.2f} USDT\n"
+            f"≈ {rub_value:,.0f} ₽\n\n"
+        )
+
+    total_rub = total_usdt * rub_rate
+
+    text = (
+        f"💰 Баланс OKX\n\n"
+        f"Общий баланс:\n"
+        f"{total_usdt:.2f} USDT\n"
+        f"≈ {total_rub:,.0f} ₽\n\n"
+        f"Активы:\n\n"
+        f"{assets_text if assets_text else 'Активов нет.'}"
+    )
 
     await message.answer(
-
-        f"💰 Баланс\n\n"
-
-        f"Общий баланс:\n"
-
-        f"{total:.2f} USDT",
-
+        text,
         reply_markup=keyboard
     )
 
@@ -1753,25 +1823,102 @@ async def show_history(message):
 
 async def show_statistics(message):
 
+    trades = get_okx_trade_statistics(100)
+    rub_rate = get_usdt_rub_rate()
+
+    if not trades:
+
+        await message.answer(
+            "📈 Статистика OKX недоступна или сделок пока нет.",
+            reply_markup=keyboard
+        )
+
+        return
+
+    buy_count = len(
+        [
+            trade
+            for trade in trades
+            if trade["side"] == "buy"
+        ]
+    )
+
+    sell_count = len(
+        [
+            trade
+            for trade in trades
+            if trade["side"] == "sell"
+        ]
+    )
+
+    volume_usdt = sum(
+        trade["amount_usdt"]
+        for trade in trades
+    )
+
+    fees_usdt = sum(
+        trade["fee"]
+        for trade in trades
+    )
+
+    text = (
+        f"📈 Статистика OKX\n\n"
+        f"Исполнений: {len(trades)}\n"
+        f"BUY: {buy_count}\n"
+        f"SELL: {sell_count}\n\n"
+        f"Оборот:\n"
+        f"{volume_usdt:.2f} USDT\n"
+        f"≈ {volume_usdt * rub_rate:,.0f} ₽\n\n"
+        f"Комиссии:\n"
+        f"{fees_usdt:.4f} USDT\n"
+        f"≈ {fees_usdt * rub_rate:,.0f} ₽\n\n"
+        f"Последние исполнения:\n\n"
+    )
+
+    for trade in trades[:10]:
+
+        emoji = "🟢" if trade["side"] == "buy" else "🔴"
+
+        text += (
+            f"{emoji} {trade['symbol']} {trade['side'].upper()}\n"
+            f"Цена: {trade['price']:.6f}\n"
+            f"Кол-во: {trade['size']:.8f}\n"
+            f"Сумма: {trade['amount_usdt']:.2f} USDT\n\n"
+        )
+
     await message.answer(
-
-        "📈 Статистика будет синхронизирована с OKX.",
-
+        text,
         reply_markup=keyboard
-
     )
 
 async def show_pnl(message):
 
-    total = get_total_balance_usdt()
+    trades = get_okx_trade_statistics(100)
+    total_balance = get_total_balance_usdt()
+    rub_rate = get_usdt_rub_rate()
+
+    volume_usdt = sum(
+        trade["amount_usdt"]
+        for trade in trades
+    )
+
+    fees_usdt = sum(
+        trade["fee"]
+        for trade in trades
+    )
 
     await message.answer(
 
-        f"💹 PnL\n\n"
-
-        f"Баланс:\n"
-
-        f"{total:.2f} USDT",
+        f"💹 PnL / OKX\n\n"
+        f"Текущий баланс:\n"
+        f"{total_balance:.2f} USDT\n"
+        f"≈ {total_balance * rub_rate:,.0f} ₽\n\n"
+        f"Оборот последних исполнений:\n"
+        f"{volume_usdt:.2f} USDT\n"
+        f"≈ {volume_usdt * rub_rate:,.0f} ₽\n\n"
+        f"Комиссии:\n"
+        f"{fees_usdt:.4f} USDT\n"
+        f"≈ {fees_usdt * rub_rate:,.0f} ₽",
 
         reply_markup=keyboard
     )
@@ -1786,11 +1933,11 @@ async def autotrade_loop(chat_id):
 
     while autotrade_enabled:
 
-        try:
+    try:
 
-            sync_positions_with_okx()
+        sync_positions_with_okx()
 
-            positions = get_open_positions()
+        positions = get_open_positions()
 
             # =====================
             # CHECK OPEN POSITIONS
