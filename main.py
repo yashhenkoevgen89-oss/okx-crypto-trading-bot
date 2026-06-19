@@ -1933,11 +1933,11 @@ async def autotrade_loop(chat_id):
 
     while autotrade_enabled:
 
-    try:
+        try:
 
-        sync_positions_with_okx()
+            sync_positions_with_okx()
 
-        positions = get_open_positions()
+            positions = get_open_positions()
 
             # =====================
             # CHECK OPEN POSITIONS
