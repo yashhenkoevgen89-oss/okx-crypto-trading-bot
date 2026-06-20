@@ -189,6 +189,7 @@ risk_settings = {
     "max_trade_usdt": 15.0,
 
     "cooldown_after_loss_minutes": 180,
+    "hold_losing_position_hours": 24,
 }
 
 # =========================
@@ -580,21 +581,8 @@ def build_daily_bot_report():
 
     total_pnl = profit_usdt + loss_usdt
 
-    wins = len(
-        [
-            row
-            for row in rows
-            if safe_float(row[6]) > 0
-        ]
-    )
-
-    losses = len(
-        [
-            row
-            for row in rows
-            if safe_float(row[6]) < 0
-        ]
-    )
+    wins = len([row for row in rows if safe_float(row[6]) > 0])
+    losses = len([row for row in rows if safe_float(row[6]) < 0])
 
     winrate = (
         wins / total_trades * 100
@@ -604,9 +592,9 @@ def build_daily_bot_report():
 
     rub_rate = get_usdt_rub_rate()
 
-    text = (
+    return (
         f"📅 Отчёт за сутки\n\n"
-        f"Сделок закрыто: {total_trades}\n"
+        f"Закрытых сделок: {total_trades}\n"
         f"Прибыльных: {wins}\n"
         f"Убыточных: {losses}\n"
         f"WinRate: {winrate:.2f}%\n\n"
@@ -618,8 +606,7 @@ def build_daily_bot_report():
         f"≈ {loss_usdt * rub_rate:,.0f} ₽\n\n"
         f"Итог за сутки:\n"
         f"{total_pnl:+.4f} USDT\n"
-        f"≈ {total_pnl * rub_rate:+,.0f} ₽\n\n"
-        f"Последние сделки:\n\n"
+        f"≈ {total_pnl * rub_rate:+,.0f} ₽"
     )
 
     for row in rows[:10]:
@@ -1401,34 +1388,25 @@ def can_trade_today():
     )
 
 
-def can_open_new_position(
-    symbol
-):
+def can_open_new_position(symbol):
 
     positions = get_open_positions()
 
     if symbol in positions:
+        return False, "Уже есть позиция в базе"
 
-        return (
-            False,
-            "EXISTS"
-        )
+    balances = get_okx_balance()
 
-    if len(
-        positions
-    ) >= risk_settings[
-        "max_open_positions"
-    ]:
+    base_currency = symbol_to_currency(symbol)
 
-        return (
-            False,
-            "LIMIT"
-        )
+    for item in balances:
+        if item["ccy"] == base_currency and item["eq_usd"] >= DUST_LIMIT_USDT:
+            return False, "Монета уже куплена на OKX"
 
-    return (
-        True,
-        "OK"
-    )
+    if len(positions) >= risk_settings["max_open_positions"]:
+        return False, "Достигнут лимит позиций"
+
+    return True, "OK"
 
 # =========================
 # INDICATORS
@@ -2059,71 +2037,51 @@ async def show_history(message):
 
 async def show_statistics(message):
 
-    trades = get_okx_trade_statistics(100)
+    rows = get_closed_trades_today()
     rub_rate = get_usdt_rub_rate()
 
-    if not trades:
+    total_trades = len(rows)
 
-        await message.answer(
-            "📈 Статистика OKX недоступна или сделок пока нет.",
-            reply_markup=keyboard
-        )
-
-        return
-
-    buy_count = len(
-        [
-            trade
-            for trade in trades
-            if trade["side"] == "buy"
-        ]
+    profit_usdt = sum(
+        safe_float(row[6])
+        for row in rows
+        if safe_float(row[6]) > 0
     )
 
-    sell_count = len(
-        [
-            trade
-            for trade in trades
-            if trade["side"] == "sell"
-        ]
+    loss_usdt = sum(
+        safe_float(row[6])
+        for row in rows
+        if safe_float(row[6]) < 0
     )
 
-    volume_usdt = sum(
-        trade["amount_usdt"]
-        for trade in trades
+    total_pnl = profit_usdt + loss_usdt
+
+    wins = len([row for row in rows if safe_float(row[6]) > 0])
+    losses = len([row for row in rows if safe_float(row[6]) < 0])
+
+    winrate = (
+        wins / total_trades * 100
+        if total_trades > 0
+        else 0
     )
-
-    fees_usdt = sum(
-        trade["fee"]
-        for trade in trades
-    )
-
-    text = (
-        f"📈 Статистика OKX\n\n"
-        f"Исполнений: {len(trades)}\n"
-        f"BUY: {buy_count}\n"
-        f"SELL: {sell_count}\n\n"
-        f"Оборот:\n"
-        f"{volume_usdt:.2f} USDT\n"
-        f"≈ {volume_usdt * rub_rate:,.0f} ₽\n\n"
-        f"Комиссии:\n"
-        f"{fees_usdt:.4f} USDT\n"
-        f"≈ {fees_usdt * rub_rate:,.0f} ₽\n\n"
-        f"Последние исполнения:\n\n"
-    )
-
-    for trade in trades[:10]:
-
-        emoji = "🟢" if trade["side"] == "buy" else "🔴"
-
-        text += (
-            f"{emoji} {trade['symbol']} {trade['side'].upper()}\n"
-            f"Цена: {trade['price']:.6f}\n"
-            f"Кол-во: {trade['size']:.8f}\n"
-            f"Сумма: {trade['amount_usdt']:.2f} USDT\n\n"
-        )
 
     await message.answer(
-        text,
+
+        f"📈 Статистика бота\n\n"
+        f"Закрытых сделок: {total_trades}\n"
+        f"Прибыльных: {wins}\n"
+        f"Убыточных: {losses}\n"
+        f"WinRate: {winrate:.2f}%\n\n"
+        f"Заработано:\n"
+        f"+{profit_usdt:.4f} USDT\n"
+        f"≈ +{profit_usdt * rub_rate:,.0f} ₽\n\n"
+        f"Потеряно:\n"
+        f"{loss_usdt:.4f} USDT\n"
+        f"≈ {loss_usdt * rub_rate:,.0f} ₽\n\n"
+        f"Общий итог:\n"
+        f"{total_pnl:+.4f} USDT\n"
+        f"≈ {total_pnl * rub_rate:+,.0f} ₽",
+
         reply_markup=keyboard
     )
 
