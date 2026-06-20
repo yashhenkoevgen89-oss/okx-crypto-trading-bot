@@ -190,6 +190,10 @@ risk_settings = {
 
     "cooldown_after_loss_minutes": 180,
     "hold_losing_position_hours": 24,
+    "break_even_enabled": True,
+    "break_even_min_hold_hours": 24,
+    "break_even_plus_percent": 0.15,
+    "emergency_stop_percent": 6.0,
 }
 
 # =========================
@@ -687,7 +691,6 @@ def save_open_position(
 ):
 
     conn = db_connect()
-
     cur = conn.cursor()
 
     cur.execute(
@@ -702,16 +705,7 @@ def save_open_position(
             highest_price,
             time
         )
-        VALUES
-        (
-            ?,
-            ?,
-            ?,
-            ?,
-            ?,
-            ?,
-            ?
-        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
         (
             symbol,
@@ -725,54 +719,56 @@ def save_open_position(
     )
 
     conn.commit()
-
     conn.close()
 
 
-def delete_open_position(
-    symbol
-):
+def update_open_position(symbol, position):
 
     conn = db_connect()
-
     cur = conn.cursor()
 
     cur.execute(
         """
-        DELETE FROM open_positions
-        WHERE symbol = ?
+        UPDATE open_positions
+        SET
+            entry_price=?,
+            amount_usdt=?,
+            stop_loss_price=?,
+            take_profit_price=?,
+            highest_price=?
+        WHERE symbol=?
         """,
         (
-            symbol,
+            safe_float(position["entry_price"]),
+            safe_float(position["amount_usdt"]),
+            safe_float(position["stop_loss_price"]),
+            safe_float(position["take_profit_price"]),
+            safe_float(position["highest_price"]),
+            symbol
         )
     )
 
     conn.commit()
-
     conn.close()
 
 
-def clear_open_positions():
+def delete_open_position(symbol):
 
     conn = db_connect()
-
     cur = conn.cursor()
 
     cur.execute(
-        """
-        DELETE FROM open_positions
-        """
+        "DELETE FROM open_positions WHERE symbol=?",
+        (symbol,)
     )
 
     conn.commit()
-
     conn.close()
 
 
 def get_open_positions():
 
     conn = db_connect()
-
     cur = conn.cursor()
 
     cur.execute(
@@ -797,36 +793,155 @@ def get_open_positions():
 
     for row in rows:
 
-        positions[
-            row[0]
-        ] = {
+        positions[row[0]] = {
 
             "symbol": row[0],
 
-            "entry_price": safe_float(
-                row[1]
-            ),
+            "entry_price": safe_float(row[1]),
 
-            "amount_usdt": safe_float(
-                row[2]
-            ),
+            "amount_usdt": safe_float(row[2]),
 
-            "stop_loss_price": safe_float(
-                row[3]
-            ),
+            "stop_loss_price": safe_float(row[3]),
 
-            "take_profit_price": safe_float(
-                row[4]
-            ),
+            "take_profit_price": safe_float(row[4]),
 
-            "highest_price": safe_float(
-                row[5]
-            ),
+            "highest_price": safe_float(row[5]),
 
             "time": row[6]
+
         }
 
     return positions
+
+
+def position_age_hours(position):
+
+    try:
+
+        opened_time = datetime.strptime(
+            position["time"],
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+        return (
+            datetime.now()
+            - opened_time
+        ).total_seconds() / 3600
+
+    except Exception:
+
+        return 999
+
+
+def get_position_pnl_percent(
+    position,
+    current_price
+):
+
+    entry_price = position["entry_price"]
+
+    if entry_price <= 0:
+        return 0
+
+    return (
+        (
+            current_price
+            - entry_price
+        )
+        / entry_price
+    ) * 100
+
+
+def should_emergency_close(
+    position,
+    current_price
+):
+
+    pnl_percent = get_position_pnl_percent(
+        position,
+        current_price
+    )
+
+    return (
+        pnl_percent
+        <=
+        -risk_settings[
+            "emergency_stop_percent"
+        ]
+    )
+
+
+def should_break_even_close(
+    position,
+    current_price
+):
+
+    if not risk_settings.get(
+        "break_even_enabled",
+        True
+    ):
+        return False
+
+    age_hours = position_age_hours(
+        position
+    )
+
+    if age_hours < risk_settings[
+        "break_even_min_hold_hours"
+    ]:
+        return False
+
+    target_price = (
+        position["entry_price"]
+        *
+        (
+            1
+            +
+            risk_settings[
+                "break_even_plus_percent"
+            ]
+            / 100
+        )
+    )
+
+    return current_price >= target_price
+
+
+def can_close_position_now(
+    position,
+    current_price
+):
+
+    pnl_percent = get_position_pnl_percent(
+        position,
+        current_price
+    )
+
+    if pnl_percent >= 0:
+
+        return True
+
+    if should_emergency_close(
+        position,
+        current_price
+    ):
+
+        return True
+
+    return False
+
+
+def clear_open_positions():
+
+    conn = db_connect()
+    cur = conn.cursor()
+
+    cur.execute(
+        "DELETE FROM open_positions"
+    )
+
+    conn.commit()
+    conn.close()
 
 # =========================
 # OKX API
@@ -2164,10 +2279,44 @@ async def autotrade_loop(chat_id):
                 position = positions[symbol]
 
                 # =====================
+                # BREAK EVEN CLOSE
+                # =====================
+
+                if should_break_even_close(
+                    position,
+                    current_price
+                ):
+
+                    result = place_market_sell(symbol)
+
+                    if okx_order_success(result):
+
+                        trade_result = close_position(
+                            symbol,
+                            current_price,
+                            "BREAK EVEN"
+                        )
+
+                        await bot.send_message(
+                            chat_id,
+                            format_closed_trade_message(
+                                trade_result
+                            )
+                        )
+
+                    continue
+
+                # =====================
                 # TRAILING STOP
                 # =====================
 
-                if current_price <= position["stop_loss_price"]:
+                if (
+                    current_price <= position["stop_loss_price"]
+                    and can_close_position_now(
+                        position,
+                        current_price
+                    )
+                ):
 
                     result = place_market_sell(symbol)
 
@@ -2181,7 +2330,9 @@ async def autotrade_loop(chat_id):
 
                         await bot.send_message(
                             chat_id,
-                            format_closed_trade_message(trade_result)
+                            format_closed_trade_message(
+                                trade_result
+                            )
                         )
 
                     continue
@@ -2190,9 +2341,17 @@ async def autotrade_loop(chat_id):
                 # SELL SIGNAL
                 # =====================
 
-                decision = multi_timeframe_decision_for_symbol(symbol)
+                decision = multi_timeframe_decision_for_symbol(
+                    symbol
+                )
 
-                if decision["signal"] == "SELL":
+                if (
+                    decision["signal"] == "SELL"
+                    and can_close_position_now(
+                        position,
+                        current_price
+                    )
+                ):
 
                     result = place_market_sell(symbol)
 
@@ -2206,7 +2365,9 @@ async def autotrade_loop(chat_id):
 
                         await bot.send_message(
                             chat_id,
-                            format_closed_trade_message(trade_result)
+                            format_closed_trade_message(
+                                trade_result
+                            )
                         )
 
                     continue
@@ -2226,7 +2387,9 @@ async def autotrade_loop(chat_id):
 
                 current_trade_symbol = symbol
 
-                decision = multi_timeframe_decision_for_symbol(symbol)
+                decision = multi_timeframe_decision_for_symbol(
+                    symbol
+                )
 
                 signal = build_signal(
                     symbol,
@@ -2243,7 +2406,9 @@ async def autotrade_loop(chat_id):
 
                     if buy_ok:
 
-                        allowed, _ = can_open_new_position(symbol)
+                        allowed, _ = can_open_new_position(
+                            symbol
+                        )
 
                         if allowed:
 
