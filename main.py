@@ -207,6 +207,7 @@ keyboard = ReplyKeyboardMarkup(
         [KeyboardButton(text="🤖 Авто статус"), KeyboardButton(text="🛡 Риск")],
         [KeyboardButton(text="📜 История"), KeyboardButton(text="📈 Статистика")],
         [KeyboardButton(text="💹 PnL")]
+        [KeyboardButton(text="📅 Отчет за сутки")],
     ],
     resize_keyboard=True
 )
@@ -527,6 +528,124 @@ def add_closed_trade(symbol, entry_price, exit_price, amount_usdt, reason):
         "pnl_usdt": safe_float(pnl_usdt),
         "reason": reason
     }
+
+
+def get_closed_trades_today():
+
+    conn = db_connect()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT
+            time,
+            symbol,
+            entry_price,
+            exit_price,
+            amount_usdt,
+            pnl_percent,
+            pnl_usdt,
+            reason
+        FROM closed_trades
+        WHERE date = ?
+        ORDER BY id DESC
+        """,
+        (
+            today_str(),
+        )
+    )
+
+    rows = cur.fetchall()
+
+    conn.close()
+
+    return rows
+
+
+def build_daily_bot_report():
+
+    rows = get_closed_trades_today()
+
+    total_trades = len(rows)
+
+    profit_usdt = sum(
+        safe_float(row[6])
+        for row in rows
+        if safe_float(row[6]) > 0
+    )
+
+    loss_usdt = sum(
+        safe_float(row[6])
+        for row in rows
+        if safe_float(row[6]) < 0
+    )
+
+    total_pnl = profit_usdt + loss_usdt
+
+    wins = len(
+        [
+            row
+            for row in rows
+            if safe_float(row[6]) > 0
+        ]
+    )
+
+    losses = len(
+        [
+            row
+            for row in rows
+            if safe_float(row[6]) < 0
+        ]
+    )
+
+    winrate = (
+        wins / total_trades * 100
+        if total_trades > 0
+        else 0
+    )
+
+    rub_rate = get_usdt_rub_rate()
+
+    text = (
+        f"📅 Отчёт за сутки\n\n"
+        f"Сделок закрыто: {total_trades}\n"
+        f"Прибыльных: {wins}\n"
+        f"Убыточных: {losses}\n"
+        f"WinRate: {winrate:.2f}%\n\n"
+        f"Заработано:\n"
+        f"+{profit_usdt:.4f} USDT\n"
+        f"≈ +{profit_usdt * rub_rate:,.0f} ₽\n\n"
+        f"Потеряно:\n"
+        f"{loss_usdt:.4f} USDT\n"
+        f"≈ {loss_usdt * rub_rate:,.0f} ₽\n\n"
+        f"Итог за сутки:\n"
+        f"{total_pnl:+.4f} USDT\n"
+        f"≈ {total_pnl * rub_rate:+,.0f} ₽\n\n"
+        f"Последние сделки:\n\n"
+    )
+
+    for row in rows[:10]:
+
+        trade_time = row[0]
+        symbol = row[1]
+        entry_price = safe_float(row[2])
+        exit_price = safe_float(row[3])
+        pnl_percent = safe_float(row[5])
+        pnl_usdt = safe_float(row[6])
+        reason = row[7]
+
+        emoji = "🟢" if pnl_usdt >= 0 else "🔴"
+
+        text += (
+            f"{emoji} {symbol}\n"
+            f"Вход: {entry_price:.6f}\n"
+            f"Выход: {exit_price:.6f}\n"
+            f"PnL: {pnl_usdt:+.4f} USDT / {pnl_percent:+.2f}%\n"
+            f"Причина: {reason}\n"
+            f"Время: {trade_time[-8:]}\n\n"
+        )
+
+    return text
 
 
 def format_closed_trade_message(trade_result):
@@ -2042,6 +2161,13 @@ async def show_pnl(message):
         reply_markup=keyboard
     )
 
+async def show_daily_report(message):
+
+    await message.answer(
+        build_daily_bot_report(),
+        reply_markup=keyboard
+    )
+
 # =========================
 # AUTOTRADE
 # =========================
@@ -2302,6 +2428,10 @@ async def text_router(message: types.Message):
 
         )
 
+    elif "📅" in text or "отчет за сутки" in text.lower():
+
+        await show_daily_report(message)
+    
 # =========================
 # MAIN
 # =========================
