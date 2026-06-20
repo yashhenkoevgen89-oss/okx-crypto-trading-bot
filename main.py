@@ -202,15 +202,56 @@ risk_settings = {
 
 keyboard = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="📊 Статус"), KeyboardButton(text="💰 Баланс")],
-        [KeyboardButton(text="📡 Сигнал"), KeyboardButton(text="🌐 Рынок")],
-        [KeyboardButton(text="🔎 Сканер"), KeyboardButton(text="🏆 Лучшая")],
-        [KeyboardButton(text="🥇 Топ-3"), KeyboardButton(text="📋 Позиции")],
-        [KeyboardButton(text="🟢 Авто ВКЛ"), KeyboardButton(text="🔴 Авто ВЫКЛ")],
-        [KeyboardButton(text="🧠 Авто монета"), KeyboardButton(text="💱 Текущая монета")],
-        [KeyboardButton(text="🤖 Авто статус"), KeyboardButton(text="🛡 Риск")],
-        [KeyboardButton(text="📜 История"), KeyboardButton(text="📈 Статистика")],
-        [KeyboardButton(text="💹 PnL"), KeyboardButton(text="📅 Отчет за сутки")],
+
+        [
+            KeyboardButton(text="📊 Статус"),
+            KeyboardButton(text="💰 Баланс")
+        ],
+
+        [
+            KeyboardButton(text="📡 Сигнал"),
+            KeyboardButton(text="🌐 Рынок")
+        ],
+
+        [
+            KeyboardButton(text="🔎 Сканер"),
+            KeyboardButton(text="🏆 Лучшая")
+        ],
+
+        [
+            KeyboardButton(text="🥇 Топ-3"),
+            KeyboardButton(text="📋 Позиции")
+        ],
+
+        [
+            KeyboardButton(text="🟢 Авто ВКЛ"),
+            KeyboardButton(text="🔴 Авто ВЫКЛ")
+        ],
+
+        [
+            KeyboardButton(text="🧠 Авто монета"),
+            KeyboardButton(text="💱 Текущая монета")
+        ],
+
+        [
+            KeyboardButton(text="🤖 Авто статус"),
+            KeyboardButton(text="🛡 Риск")
+        ],
+
+        [
+            KeyboardButton(text="📜 История"),
+            KeyboardButton(text="📈 Статистика")
+        ],
+
+        [
+            KeyboardButton(text="💹 PnL"),
+            KeyboardButton(text="📅 Отчет за сутки")
+        ],
+
+        [
+            KeyboardButton(text="🔄 Синхронизация OKX")
+        ]
+
     ],
     resize_keyboard=True
 )
@@ -1462,37 +1503,51 @@ def update_trailing_stop(
 def sync_positions_with_okx():
 
     positions = get_open_positions()
-
     balances = get_okx_balance()
 
     real_assets = set()
 
     for item in balances:
 
-        if (
-            item["ccy"] == "USDT"
-            or
-            item["eq_usd"] < DUST_LIMIT_USDT
-        ):
+        if item["ccy"] == "USDT":
+            continue
+
+        if item["eq_usd"] < DUST_LIMIT_USDT:
             continue
 
         symbol = currency_to_symbol(
             item["ccy"]
         )
 
-        real_assets.add(
+        current_price = get_current_price(
             symbol
         )
 
-    for symbol in list(
-        positions.keys()
-    ):
+        if current_price <= 0:
+            continue
+
+        real_assets.add(symbol)
+
+        if symbol not in positions:
+
+            save_open_position(
+                symbol,
+                current_price,
+                item["eq_usd"],
+                current_price * (
+                    1 - risk_settings["stop_loss_percent"] / 100
+                ),
+                current_price * (
+                    1 + risk_settings["take_profit_percent"] / 100
+                ),
+                current_price
+            )
+
+    for symbol in list(positions.keys()):
 
         if symbol not in real_assets:
 
-            delete_open_position(
-                symbol
-            )
+            delete_open_position(symbol)
 
 
 def can_trade_today():
@@ -2478,80 +2533,163 @@ async def start_cmd(message: types.Message):
 async def text_router(message: types.Message):
 
     global autotrade_enabled
+    global auto_select_symbol
+    global current_trade_symbol
 
     text = message.text or ""
+    text_lower = text.lower()
 
-    if "📊" in text:
+    if "📊" in text or "статус" in text_lower and "авто" not in text_lower:
+
         await show_status(message)
 
-    elif "💰" in text:
+    elif "💰" in text or "баланс" in text_lower:
+
         await show_balance(message)
 
-    elif "📡" in text:
+    elif "📡" in text or "сигнал" in text_lower:
+
         await show_signal(message)
 
-    elif "🌐" in text:
+    elif "🌐" in text or "рынок" in text_lower:
+
         await show_market(message)
 
-    elif "🔎" in text:
+    elif "🔎" in text or "сканер" in text_lower:
+
         await show_scanner(message)
 
-    elif "🏆" in text:
+    elif "🏆" in text or "лучшая" in text_lower:
+
         await show_best_symbol(message)
 
-    elif "📋" in text:
+    elif "🥇" in text or "топ" in text_lower:
+
+        if "show_top3" in globals():
+            await show_top3(message)
+        else:
+            await message.answer(
+                "🥇 TOP-3 пока недоступен.",
+                reply_markup=keyboard
+            )
+
+    elif "📋" in text or "позиц" in text_lower:
+
+        sync_positions_with_okx()
+
         await show_positions(message)
 
-    elif "📜" in text:
+    elif "📜" in text or "история" in text_lower:
+
         await show_history(message)
 
-    elif "📈" in text:
+    elif "📈" in text or "статист" in text_lower:
+
         await show_statistics(message)
 
-    elif "💹" in text:
+    elif "💹" in text or "pnl" in text_lower:
+
         await show_pnl(message)
 
-    elif "🟢" in text:
+    elif "📅" in text or "отчет за сутки" in text_lower or "отчёт за сутки" in text_lower:
+
+        await show_daily_report(message)
+
+    elif "🤖" in text or "авто статус" in text_lower:
+
+        if "show_auto_status" in globals():
+            await show_auto_status(message)
+        else:
+            await show_status(message)
+
+    elif "🛡" in text or "риск" in text_lower:
+
+        if "show_risk" in globals():
+            await show_risk(message)
+        else:
+            await message.answer(
+                "🛡 Риск\n\n"
+                f"BUY от: {risk_settings['buy_score']}%\n"
+                f"SELL до: {risk_settings['sell_score']}%\n"
+                f"ADX минимум: {risk_settings['min_adx']}\n"
+                f"Trailing stop: {risk_settings['trailing_stop_percent']}%\n"
+                f"Break-even: {'ВКЛ' if risk_settings.get('break_even_enabled', True) else 'ВЫКЛ'}",
+                reply_markup=keyboard
+            )
+
+    elif "💱" in text or "текущ" in text_lower:
+
+        await message.answer(
+            f"💱 Текущая монета\n\n{current_trade_symbol}",
+            reply_markup=keyboard
+        )
+
+    elif "🧠" in text or "авто монета" in text_lower:
+
+        auto_select_symbol = not auto_select_symbol
+
+        save_runtime_settings()
+
+        await message.answer(
+            f"🧠 Авто монета\n\n"
+            f"{'✅ ВКЛ' if auto_select_symbol else '❌ ВЫКЛ'}",
+            reply_markup=keyboard
+        )
+
+    elif "🟢" in text or "авто вкл" in text_lower:
 
         if not autotrade_enabled:
 
             autotrade_enabled = True
 
+            db_set(
+                "last_chat_id",
+                message.chat.id
+            )
+
             save_runtime_settings()
 
             asyncio.create_task(
-
-                autotrade_loop(
-                    message.chat.id
-                )
-
+                autotrade_loop(message.chat.id)
             )
 
         await message.answer(
-
             "🟢 Автоторговля включена",
-
             reply_markup=keyboard
-
         )
 
-    elif "🔴" in text:
+    elif "🔴" in text or "авто выкл" in text_lower:
 
         autotrade_enabled = False
 
         save_runtime_settings()
 
         await message.answer(
-
             "🔴 Автоторговля выключена",
-
             reply_markup=keyboard
-
         )
 
-    elif "📅" in text or "отчет за сутки" in text.lower():
+    elif "🔄" in text or "синх" in text_lower:
 
-        await show_daily_report(message)
+        sync_positions_with_okx()
+
+        positions = get_open_positions()
+
+        await message.answer(
+
+            f"✅ Синхронизация OKX выполнена\n\n"
+            f"Активов под управлением: {len(positions)}\n\n"
+            f"Теперь активы OKX добавлены в открытые позиции бота.",
+
+            reply_markup=keyboard
+        )
+
+    else:
+
+        await message.answer(
+            "❓ Команда не распознана",
+            reply_markup=keyboard
+        )
     
 # =========================
 # MAIN
