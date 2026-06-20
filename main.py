@@ -188,10 +188,7 @@ risk_settings = {
 
     "max_trade_usdt": 15.0,
 
-    "cooldown_after_loss_minutes": 180
-}
-
-
+    "cooldown_after_loss_minutes":
 # =========================
 # KEYBOARD
 # =========================
@@ -206,8 +203,7 @@ keyboard = ReplyKeyboardMarkup(
         [KeyboardButton(text="🧠 Авто монета"), KeyboardButton(text="💱 Текущая монета")],
         [KeyboardButton(text="🤖 Авто статус"), KeyboardButton(text="🛡 Риск")],
         [KeyboardButton(text="📜 История"), KeyboardButton(text="📈 Статистика")],
-        [KeyboardButton(text="💹 PnL")]
-        [KeyboardButton(text="📅 Отчет за сутки")],
+        [KeyboardButton(text="💹 PnL"), KeyboardButton(text="📅 Отчет за сутки")],
     ],
     resize_keyboard=True
 )
