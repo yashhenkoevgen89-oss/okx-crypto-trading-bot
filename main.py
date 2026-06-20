@@ -466,6 +466,109 @@ def load_runtime_settings():
         risk_settings.update(
             saved_risk
         )
+
+# =========================
+# CLOSED TRADES / REPORTS
+# =========================
+
+def add_closed_trade(symbol, entry_price, exit_price, amount_usdt, reason):
+
+    pnl_percent = (
+        (exit_price - entry_price)
+        / entry_price
+        * 100
+        if entry_price > 0
+        else 0
+    )
+
+    pnl_usdt = amount_usdt * pnl_percent / 100
+
+    conn = db_connect()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        INSERT INTO closed_trades
+        (
+            time,
+            date,
+            symbol,
+            entry_price,
+            exit_price,
+            amount_usdt,
+            pnl_percent,
+            pnl_usdt,
+            reason
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            now(),
+            today_str(),
+            symbol,
+            safe_float(entry_price),
+            safe_float(exit_price),
+            safe_float(amount_usdt),
+            safe_float(pnl_percent),
+            safe_float(pnl_usdt),
+            reason
+        )
+    )
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "symbol": symbol,
+        "entry_price": safe_float(entry_price),
+        "exit_price": safe_float(exit_price),
+        "amount_usdt": safe_float(amount_usdt),
+        "pnl_percent": safe_float(pnl_percent),
+        "pnl_usdt": safe_float(pnl_usdt),
+        "reason": reason
+    }
+
+
+def format_closed_trade_message(trade_result):
+
+    if not trade_result:
+        return "Сделка закрыта, но данные не найдены."
+
+    pnl_emoji = "🟢" if trade_result["pnl_usdt"] >= 0 else "🔴"
+
+    return (
+        f"{pnl_emoji} SELL / ЗАКРЫТИЕ\n\n"
+        f"{trade_result['symbol']}\n\n"
+        f"Причина продажи:\n"
+        f"{trade_result['reason']}\n\n"
+        f"Купил по:\n"
+        f"{trade_result['entry_price']:.6f}\n\n"
+        f"Продал по:\n"
+        f"{trade_result['exit_price']:.6f}\n\n"
+        f"Сумма сделки:\n"
+        f"{trade_result['amount_usdt']:.2f} USDT\n\n"
+        f"Результат:\n"
+        f"{trade_result['pnl_usdt']:+.4f} USDT\n"
+        f"{trade_result['pnl_percent']:+.2f}%"
+    )
+
+
+def format_buy_message(symbol, decision, amount):
+
+    return (
+        f"🟢 AUTO BUY / ПОКУПКА\n\n"
+        f"{symbol}\n\n"
+        f"Причина покупки:\n"
+        f"Сигнал BUY по 5m + 15m + 1H\n\n"
+        f"Цена покупки:\n"
+        f"{decision['price']:.6f}\n\n"
+        f"Сила сигнала:\n"
+        f"{decision['avg_score']}%\n\n"
+        f"Сумма:\n"
+        f"{amount:.2f} USDT\n\n"
+        f"Trailing включится после:\n"
+        f"+{risk_settings['trailing_start_profit_percent']}%"
+    )
 # =========================
 # POSITIONS
 # =========================
@@ -1003,13 +1106,29 @@ def open_position(
         entry_price
 
     )
-def close_position(
-    symbol
-):
+def close_position(symbol, exit_price=None, reason="CLOSE"):
 
-    delete_open_position(
-        symbol
+    positions = get_open_positions()
+
+    if symbol not in positions:
+        return None
+
+    position = positions[symbol]
+
+    if exit_price is None:
+        exit_price = get_current_price(symbol)
+
+    trade_result = add_closed_trade(
+        symbol,
+        position["entry_price"],
+        exit_price,
+        position["amount_usdt"],
+        reason
     )
+
+    delete_open_position(symbol)
+
+    return trade_result
 def update_trailing_stop(
     symbol,
     current_price
@@ -1945,9 +2064,7 @@ async def autotrade_loop(chat_id):
 
             for symbol, position in positions.items():
 
-                current_price = get_current_price(
-                    symbol
-                )
+                current_price = get_current_price(symbol)
 
                 if current_price <= 0:
                     continue
@@ -1962,65 +2079,72 @@ async def autotrade_loop(chat_id):
                 if symbol not in positions:
                     continue
 
-                position = positions[
-                    symbol
-                ]
+                position = positions[symbol]
 
-                if current_price <= position[
-                    "stop_loss_price"
-                ]:
+                # =====================
+                # TRAILING STOP
+                # =====================
 
-                    result = place_market_sell(
-                        symbol
-                    )
+                if current_price <= position["stop_loss_price"]:
 
-                    if okx_order_success(
-                        result
-                    ):
+                    result = place_market_sell(symbol)
 
-                        close_position(
-                            symbol
+                    if okx_order_success(result):
+
+                        trade_result = close_position(
+                            symbol,
+                            current_price,
+                            "TRAILING STOP"
                         )
 
                         await bot.send_message(
-
                             chat_id,
-
-                            f"🔴 SELL\n\n"
-
-                            f"{symbol}\n\n"
-
-                            f"TRAILING STOP"
-
+                            format_closed_trade_message(trade_result)
                         )
 
+                    continue
+
+                # =====================
+                # SELL SIGNAL
+                # =====================
+
+                decision = multi_timeframe_decision_for_symbol(symbol)
+
+                if decision["signal"] == "SELL":
+
+                    result = place_market_sell(symbol)
+
+                    if okx_order_success(result):
+
+                        trade_result = close_position(
+                            symbol,
+                            current_price,
+                            "SELL SIGNAL"
+                        )
+
+                        await bot.send_message(
+                            chat_id,
+                            format_closed_trade_message(trade_result)
+                        )
+
+                    continue
+
             # =====================
-            # BUY
+            # OPEN NEW POSITION
             # =====================
 
             positions = get_open_positions()
 
-            if len(
-                positions
-            ) < risk_settings[
-                "max_open_positions"
-            ]:
+            if len(positions) < risk_settings["max_open_positions"]:
 
                 if auto_select_symbol:
-
                     symbol, _ = choose_best_symbol()
-
                 else:
-
                     symbol = current_trade_symbol
 
                 current_trade_symbol = symbol
 
-                decision = (
-                    multi_timeframe_decision_for_symbol(
-                        symbol
-                    )
-                )
+                decision = multi_timeframe_decision_for_symbol(symbol)
 
                 signal = build_signal(
                     symbol,
@@ -2030,82 +2154,54 @@ async def autotrade_loop(chat_id):
                 if signal:
 
                     buy_ok, _ = is_strong_buy(
-
                         symbol,
-
                         decision,
-
                         signal
-
                     )
 
                     if buy_ok:
 
-                        allowed, _ = can_open_new_position(
-                            symbol
-                        )
+                        allowed, _ = can_open_new_position(symbol)
 
                         if allowed:
 
                             amount = get_trade_amount_usdt()
 
                             result = place_market_buy(
-
                                 symbol,
-
                                 amount
-
                             )
 
-                            if okx_order_success(
-                                result
-                            ):
+                            if okx_order_success(result):
 
                                 open_position(
-
                                     symbol,
-
-                                    decision[
-                                        "price"
-                                    ],
-
+                                    decision["price"],
                                     amount
-
                                 )
 
                                 await bot.send_message(
-
                                     chat_id,
-
-                                    f"🟢 AUTO BUY\n\n"
-
-                                    f"{symbol}\n\n"
-
-                                    f"Сила:\n"
-
-                                    f"{decision['avg_score']}%"
-
+                                    format_buy_message(
+                                        symbol,
+                                        decision,
+                                        amount
+                                    )
                                 )
+
+            save_runtime_settings()
 
         except Exception as e:
 
             try:
-
                 await bot.send_message(
-
                     chat_id,
-
-                    f"⚠️ Ошибка\n\n{e}"
-
+                    f"⚠️ Ошибка автоторговли\n\n{e}"
                 )
-
             except Exception:
-
                 pass
 
-        await asyncio.sleep(
-            AUTO_INTERVAL
-        )
+        await asyncio.sleep(AUTO_INTERVAL)
 
 # =========================
 # START
