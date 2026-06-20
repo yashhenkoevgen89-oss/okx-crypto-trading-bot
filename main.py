@@ -188,7 +188,9 @@ risk_settings = {
 
     "max_trade_usdt": 15.0,
 
-    "cooldown_after_loss_minutes":
+    "cooldown_after_loss_minutes": 180,
+}
+
 # =========================
 # KEYBOARD
 # =========================
