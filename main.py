@@ -176,9 +176,9 @@ risk_settings = {
 
     "min_adx": 18,
 
-    "max_open_positions": 5,
+    "max_open_positions": 10,
 
-    "max_trades_day": 15,
+    "max_trades_day": 50,
 
     "auto_amount_enabled": True,
 
