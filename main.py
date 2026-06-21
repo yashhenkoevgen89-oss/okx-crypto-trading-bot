@@ -59,7 +59,7 @@ DB_FILE = "bot.db"
 DUST_LIMIT_USDT = float(
     os.getenv(
         "DUST_LIMIT_USDT",
-        "5"
+        "1"
     )
 )
 
@@ -1093,6 +1093,41 @@ def get_okx_fills(limit=100):
         print(f"get_okx_fills error: {e}")
         return []
 
+def estimate_entry_price_from_fills(symbol, current_amount_usdt):
+
+    try:
+        fills = get_okx_fills(100)
+
+        buys = []
+
+        for item in fills:
+            if item.get("instId") != symbol:
+                continue
+
+            if item.get("side") != "buy":
+                continue
+
+            price = safe_float(item.get("fillPx", 0))
+            size = safe_float(item.get("fillSz", 0))
+
+            if price > 0 and size > 0:
+                buys.append((price, size))
+
+        if not buys:
+            return 0
+
+        total_qty = sum(size for price, size in buys)
+        total_cost = sum(price * size for price, size in buys)
+
+        if total_qty <= 0:
+            return 0
+
+        return total_cost / total_qty
+
+    except Exception as e:
+        print(f"estimate_entry_price_from_fills error {symbol}: {e}")
+        return 0
+
 
 def get_okx_trade_statistics(limit=100):
 
@@ -1509,44 +1544,50 @@ def sync_positions_with_okx():
 
     for item in balances:
 
-        if item["ccy"] == "USDT":
+        ccy = item["ccy"]
+        eq_usd = safe_float(item["eq_usd"])
+
+        if ccy == "USDT":
             continue
 
-        if item["eq_usd"] < DUST_LIMIT_USDT:
+        if eq_usd < DUST_LIMIT_USDT:
             continue
 
-        symbol = currency_to_symbol(
-            item["ccy"]
-        )
+        symbol = currency_to_symbol(ccy)
 
-        current_price = get_current_price(
-            symbol
-        )
+        current_price = get_current_price(symbol)
 
         if current_price <= 0:
             continue
 
         real_assets.add(symbol)
 
-        if symbol not in positions:
+        if symbol in positions:
+            position = positions[symbol]
+            position["amount_usdt"] = eq_usd
+            update_open_position(symbol, position)
+            continue
 
-            save_open_position(
-                symbol,
-                current_price,
-                item["eq_usd"],
-                current_price * (
-                    1 - risk_settings["stop_loss_percent"] / 100
-                ),
-                current_price * (
-                    1 + risk_settings["take_profit_percent"] / 100
-                ),
-                current_price
-            )
+        entry_price = estimate_entry_price_from_fills(
+            symbol,
+            eq_usd
+        )
+
+        if entry_price <= 0:
+            entry_price = current_price
+
+        save_open_position(
+            symbol,
+            entry_price,
+            eq_usd,
+            entry_price * (1 - risk_settings["stop_loss_percent"] / 100),
+            entry_price * (1 + risk_settings["take_profit_percent"] / 100),
+            max(entry_price, current_price)
+        )
 
     for symbol in list(positions.keys()):
 
         if symbol not in real_assets:
-
             delete_open_position(symbol)
 
 
