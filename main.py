@@ -189,11 +189,11 @@ risk_settings = {
     "max_trade_usdt": 15.0,
 
     "cooldown_after_loss_minutes": 180,
-    "hold_losing_position_hours": 24,
+    "hold_losing_position_hours": 36,
     "break_even_enabled": True,
     "break_even_min_hold_hours": 24,
     "break_even_plus_percent": 0.15,
-    "emergency_stop_percent": 2.0,
+    "emergency_stop_percent": 3.0,
 }
 
 # =========================
