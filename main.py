@@ -193,7 +193,7 @@ risk_settings = {
     "break_even_enabled": True,
     "break_even_min_hold_hours": 24,
     "break_even_plus_percent": 0.15,
-    "emergency_stop_percent": 3.0,
+    "emergency_stop_percent": 5.0,
 }
 
 # =========================
