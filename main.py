@@ -164,7 +164,7 @@ risk_settings = {
 
     "stop_loss_percent": 0.6,
 
-    "take_profit_percent": 1.2,
+    "take_profit_percent": 1.5,
 
     "trailing_stop_percent": 0.35,
 
@@ -178,7 +178,7 @@ risk_settings = {
 
     "max_open_positions": 10,
 
-    "max_trades_day": 50,
+    "max_trades_day": 30,
 
     "auto_amount_enabled": True,
 
@@ -193,7 +193,7 @@ risk_settings = {
     "break_even_enabled": True,
     "break_even_min_hold_hours": 24,
     "break_even_plus_percent": 0.15,
-    "emergency_stop_percent": 5.0,
+    "emergency_stop_percent": 0.5,
 }
 
 # =========================
