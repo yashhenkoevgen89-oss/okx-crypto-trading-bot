@@ -166,9 +166,9 @@ risk_settings = {
 
     "take_profit_percent": 1.5,
 
-    "trailing_stop_percent": 0.35,
+    "trailing_stop_percent": 0.5,
 
-    "trailing_start_profit_percent": 0.45,
+    "trailing_start_profit_percent": 1.0,
 
     "buy_score": 75,
 
@@ -912,10 +912,7 @@ def should_emergency_close(
     )
 
 
-def should_break_even_close(
-    position,
-    current_price
-):
+def should_break_even_close(position, current_price):
 
     if not risk_settings.get(
         "break_even_enabled",
@@ -923,50 +920,48 @@ def should_break_even_close(
     ):
         return False
 
-    age_hours = position_age_hours(
-        position
-    )
+    age_hours = position_age_hours(position)
 
-    if age_hours < risk_settings[
-        "break_even_min_hold_hours"
-    ]:
+    if age_hours < risk_settings.get(
+        "break_even_min_hold_hours",
+        24
+    ):
         return False
 
-    target_price = (
-        position["entry_price"]
-        *
-        (
-            1
-            +
-            risk_settings[
-                "break_even_plus_percent"
-            ]
-            / 100
-        )
+    target_price = position["entry_price"] * (
+        1
+        +
+        risk_settings.get(
+            "break_even_plus_percent",
+            0.15
+        ) / 100
     )
 
     return current_price >= target_price
 
 
-def can_close_position_now(
-    position,
-    current_price
-):
+def can_close_position_now(position, current_price):
 
     pnl_percent = get_position_pnl_percent(
         position,
         current_price
     )
 
-    if pnl_percent >= 0:
+    age_hours = position_age_hours(position)
 
+    # Если позиция в плюсе — закрывать можно
+    if pnl_percent >= 0:
         return True
 
+    # Если позиция в минусе меньше 24 часов — не закрываем
+    if age_hours < risk_settings.get("break_even_min_hold_hours", 24):
+        return False
+
+    # После 24 часов разрешаем аварийный выход только при сильной просадке
     if should_emergency_close(
         position,
         current_price
     ):
-
         return True
 
     return False
